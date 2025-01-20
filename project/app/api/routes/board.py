@@ -1,5 +1,4 @@
 # 정보 게시판
-
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 import mysql.connector
@@ -7,6 +6,7 @@ import traceback
 
 
 router = APIRouter()
+
 def get_connection():
     return mysql.connector.connect(
         host="localhost",

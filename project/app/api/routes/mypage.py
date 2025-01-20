@@ -1,6 +1,4 @@
 # mypage - 정보 조회, 수정, 탈퇴 
-
-
 import hashlib
 import traceback
 from typing import Dict

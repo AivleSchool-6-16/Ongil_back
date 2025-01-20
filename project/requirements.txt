@@ -8,3 +8,4 @@ python-jose
 passlib
 redis
 email-validator
+mysql-connector-python

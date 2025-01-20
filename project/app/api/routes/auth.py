@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 import redis
 
-from app.db.database import get_db
-from app.db.user_model import User
+from app.db.database import get_db 
+from app.db.user_model import User # mysql로 연결 후 변경 
 from app.utils.security import hash_password, verify_password
 from app.utils.email_utils import generate_verification_code, send_verification_email
 from app.utils.jwt_utils import create_access_token, verify_token, create_refresh_token
@@ -175,11 +175,11 @@ def findpwd(request: FindPasswordRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
-    # Generate and store verification code
+    # 코드 생성 
     code = generate_verification_code()
     verification_codes[request.email] = code
 
-    # Send the code via email
+    # 이메일로 코드 전송
     if not send_verification_email(request.email, code):
         raise HTTPException(status_code=500, detail="인증번호 이메일 발송에 실패했습니다.")
 
