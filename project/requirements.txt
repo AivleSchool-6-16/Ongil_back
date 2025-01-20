@@ -3,3 +3,8 @@ uvicorn
 pymysql
 python-dotenv
 passlib[bcrypt]
+sqlalchemy
+python-jose 
+passlib
+redis
+email-validator
