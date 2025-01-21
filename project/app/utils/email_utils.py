@@ -10,8 +10,8 @@ def generate_verification_code():
 def send_verification_email(email: str, code: str):
     smtp_server = "smtp.gmail.com"
     smtp_port = 587
-    sender_email = "ejji0001@gmail.com"
-    sender_password = "defn mnnr cwdm xoms"
+    sender_email = "ejji0001@gmail.com" # 보내는 메일
+    sender_password = "defn mnnr cwdm xoms" # - 보안 문제 
 
     message = MIMEText(f"인증번호: {code}")
     message["Subject"] = "비밀번호 복구 인증번호"

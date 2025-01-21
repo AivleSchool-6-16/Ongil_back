@@ -1,10 +1,7 @@
-from fastapi import FastAPI,Request, HTTPException
-from app.db.database import Base, engine
-from app.api.routes import auth
+from fastapi import FastAPI, Request, HTTPException
+from app.api.routes import auth, board, mypage
 from app.utils.token_blacklist import is_token_blacklisted
 from app.utils.jwt_utils import verify_token
-# Create all tables in the database
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
@@ -28,3 +25,4 @@ app.include_router(mypage.router, prefix="/mypage", tags=["MyPage"])
 @app.get("/")
 def root():
     return {"message": "개발 중.."}
+

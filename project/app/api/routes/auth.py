@@ -1,18 +1,25 @@
 #로그인, 로그아웃, 회원가입, 비번 찾기
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, EmailStr, field_validator
-from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 import redis
-
-from app.db.database import get_db 
-from app.db.user_model import User # mysql로 연결 후 변경 
+import mysql.connector
+from mysql.connector import Error
 from app.utils.security import hash_password, verify_password
 from app.utils.email_utils import generate_verification_code, send_verification_email
 from app.utils.jwt_utils import create_access_token, verify_token, create_refresh_token
 from app.utils.token_blacklist import add_token_to_blacklist, is_token_blacklisted
 
+
 router = APIRouter()
+
+def get_connection():
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="password",
+        database="ongil"
+    )
 
 try:
     redis_client = redis.StrictRedis(host="localhost", port=6379, db=0)
@@ -24,7 +31,7 @@ except Exception as e:
     print(f"Redis connection failed: {e}")
     redis_client = None 
 
-# 인증번호 임시 저장 : 보안성(
+# 인증번호 임시 저장 : 보안성(?)
 verification_codes = {}
 
 # requests 모델 정의 
@@ -68,48 +75,63 @@ class ResetPasswordRequest(BaseModel):
     confirm_password: str
 
 
-def find_user_by_email(email: str, db: Session) -> User:
-    return db.query(User).filter(User.email == email).first()
+def find_user_by_email(email: str):
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        query = "SELECT * FROM user WHERE email = %s"
+        cursor.execute(query, (email,))
+        user = cursor.fetchone()
+        return user
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
 
 @router.post("/signup")
-def signup(request: SignUpRequest, db: Session = Depends(get_db)):
+def signup(request: SignUpRequest):
     if not request.email.endswith("@gmail.com"):
         raise HTTPException(status_code=400, detail="'@korea.kr' 형식만 가능합니다.")
 
-    if find_user_by_email(request.email, db):
+    if find_user_by_email(request.email):
         raise HTTPException(status_code=400, detail="이메일이 이미 존재합니다.")
 
     hashed_password = hash_password(request.password)
-    new_user = User(
-        email=request.email,
-        password=hashed_password,
-        name=request.name,
-        mgmt_area=request.management_area,
-        department=request.department
-    )
-    db.add(new_user)
-    db.commit()
+
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        query = (
+            "INSERT INTO user (email, password, name, mgmt_area, department) "
+            "VALUES (%s, %s, %s, %s, %s)"
+        )
+        cursor.execute(query, (request.email, hashed_password, request.name, request.management_area, request.department))
+        connection.commit()
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
 
     return {"message": "회원가입에 성공하였습니다."}
 
 
 @router.post("/login")
-def login_user(request: LoginRequest, db: Session = Depends(get_db)):
-    user = find_user_by_email(request.email, db)
+def login_user(request: LoginRequest):
+    user = find_user_by_email(request.email)
     if not request.email.endswith("@gmail.com"):
         raise HTTPException(status_code=400, detail="'@korea.kr' 형식만 가능합니다.")
-    
+
     if not user:
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
-    if not verify_password(request.password, user.password):
+    if not verify_password(request.password, user['password']):
         raise HTTPException(status_code=400, detail="비밀번호가 올바르지 않습니다.")
 
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=timedelta(minutes=15)
+        data={"sub": user['email']}, expires_delta=timedelta(minutes=15)
     )
     refresh_token = create_refresh_token(
-        data={"sub": user.email}, expires_delta=timedelta(hours=3)
+        data={"sub": user['email']}, expires_delta=timedelta(hours=3)
     )
 
     return {
@@ -117,6 +139,7 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
         "refresh_token": refresh_token,
         "token_type": "bearer"
     }
+
 
 @router.post("/logout")
 def logout(request: LogoutRequest):
@@ -133,20 +156,20 @@ def logout(request: LogoutRequest):
 
 
 @router.post("/refresh-token")
-def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
+def refresh_token(refresh_token: str):
     payload = verify_token(refresh_token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
 
-    user = find_user_by_email(payload["sub"], db)
+    user = find_user_by_email(payload["sub"])
     if not user:
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=timedelta(minutes=15)
+        data={"sub": user['email']}, expires_delta=timedelta(minutes=15)
     )
     new_refresh_token = create_refresh_token(
-        data={"sub": user.email}, expires_delta=timedelta(hours=3)
+        data={"sub": user['email']}, expires_delta=timedelta(hours=3)
     )
 
     return {
@@ -157,7 +180,6 @@ def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
 
 @router.get("/protected")
 def protected_route(token: str = Header(...)):
-    """Example protected route"""
     if is_token_blacklisted(token):
         raise HTTPException(status_code=401, detail="Token is blacklisted.")
 
@@ -169,17 +191,14 @@ def protected_route(token: str = Header(...)):
 
 
 @router.post("/findpwd")
-def findpwd(request: FindPasswordRequest, db: Session = Depends(get_db)):
-    """Request password recovery code"""
-    user = find_user_by_email(request.email, db)
+def findpwd(request: FindPasswordRequest):
+    user = find_user_by_email(request.email)
     if not user:
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
-    # 코드 생성 
     code = generate_verification_code()
     verification_codes[request.email] = code
 
-    # 이메일로 코드 전송
     if not send_verification_email(request.email, code):
         raise HTTPException(status_code=500, detail="인증번호 이메일 발송에 실패했습니다.")
 
@@ -187,18 +206,16 @@ def findpwd(request: FindPasswordRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/verify-code")
-def verify_code(request: VerifyCodeRequest, db: Session = Depends(get_db)):
-    """Verify the recovery code and issue a reset token"""
+def verify_code(request: VerifyCodeRequest):
     if request.email not in verification_codes or verification_codes[request.email] != request.code:
         raise HTTPException(status_code=400, detail="유효하지 않은 인증번호입니다.")
 
-    user = find_user_by_email(request.email, db)
+    user = find_user_by_email(request.email)
     if not user:
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
-    # Issue a temporary token for password reset
     reset_token = create_access_token(
-        data={"sub": user.email, "action": "password_reset"},
+        data={"sub": user['email'], "action": "password_reset"},
         expires_delta=timedelta(minutes=15)
     )
 
@@ -209,25 +226,30 @@ def verify_code(request: VerifyCodeRequest, db: Session = Depends(get_db)):
 
   
 @router.post("/reset-password")
-def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
-    """Reset the user's password"""
-    # Validate the reset token
+def reset_password(request: ResetPasswordRequest):
     payload = verify_token(request.reset_token)
     if not payload or payload.get("action") != "password_reset":
-        raise HTTPException(status_code=401, detail="Invaild reset token.")
+        raise HTTPException(status_code=401, detail="Invalid reset token.")
 
     email = payload.get("sub")
-    user = find_user_by_email(email, db)
+    user = find_user_by_email(email)
     if not user:
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
-    # Check if passwords match
     if request.new_password != request.confirm_password:
         raise HTTPException(status_code=400, detail="비밀번호가 일치하지 않습니다.")
 
-    # Update the user's password
     hashed_password = hash_password(request.new_password)
-    user.password = hashed_password
-    db.commit()
+
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        query = "UPDATE user SET password = %s WHERE email = %s"
+        cursor.execute(query, (hashed_password, email))
+        connection.commit()
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
 
     return {"message": "비밀번호가 성공적으로 재설정되었습니다."}
