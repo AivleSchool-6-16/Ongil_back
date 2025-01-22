@@ -8,12 +8,10 @@ from app.utils.jwt_utils import verify_token
 
 DATABASE_URL = "mysql+pymysql://root:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
 
-# SQLAlchemy setup
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Dependency for DB sessions
 def get_db():
     db = SessionLocal()
     try:

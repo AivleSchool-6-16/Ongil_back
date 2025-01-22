@@ -1,4 +1,3 @@
-#로그인, 로그아웃, 회원가입, 비번 찾기
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
@@ -10,37 +9,40 @@ from app.utils.email_utils import generate_verification_code, send_verification_
 from app.utils.jwt_utils import create_access_token, verify_token, create_refresh_token
 from app.utils.token_blacklist import add_token_to_blacklist, is_token_blacklisted
 
-
 router = APIRouter()
 
 def get_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="password",
-        database="ongil"
-    )
+    try:
+        connection = mysql.connector.connect(
+            host="ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com",
+            user="admin",
+            password="aivle202406",
+            database="ongildb"
+        )
+        if connection.is_connected():
+            return connection
+    except Error as e:
+        print(f"Error connecting to the database: {e}")
+        raise HTTPException(status_code=500, detail="Could not connect to the database.")
 
 try:
     redis_client = redis.StrictRedis(host="localhost", port=6379, db=0)
-    
-    # Test the connection
     redis_client.ping()
     print("Connected to Redis")
 except Exception as e:
     print(f"Redis connection failed: {e}")
-    redis_client = None 
+    redis_client = None
 
 # 인증번호 임시 저장 : 보안성(?)
 verification_codes = {}
 
-# requests 모델 정의 
+# requests 모델 정의
 class SignUpRequest(BaseModel):
     email: EmailStr
     password: str
     confirm_password: str
     name: str
-    management_area: str
+    jurisdiction: str
     department: str
 
     @field_validator("password")
@@ -54,7 +56,7 @@ class SignUpRequest(BaseModel):
         if "password" in info.data and value != info.data["password"]:
             raise ValueError("비밀번호가 다릅니다.")
         return value
-    
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -74,24 +76,27 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
     confirm_password: str
 
-
 def find_user_by_email(email: str):
     try:
-        connection = get_connection()
+        connection = get_connection()  # Attempt to establish a connection
         cursor = connection.cursor(dictionary=True)
-        query = "SELECT * FROM user WHERE email = %s"
+        query = "SELECT * FROM user_data WHERE user_email = %s"
         cursor.execute(query, (email,))
         user = cursor.fetchone()
         return user
+    except Error as e:
+        print(f"Database error: {e}")  # Log the error for debugging
+        raise HTTPException(status_code=500, detail="Database connection failed.")
     finally:
-        if connection.is_connected():
+        if 'cursor' in locals() and cursor:  # Close cursor if it exists
             cursor.close()
+        if 'connection' in locals() and connection.is_connected():  # Close connection if it exists
             connection.close()
 
 @router.post("/signup")
 def signup(request: SignUpRequest):
     if not request.email.endswith("@gmail.com"):
-        raise HTTPException(status_code=400, detail="'@korea.kr' 형식만 가능합니다.")
+        raise HTTPException(status_code=400, detail="'@gmail.com' 형식만 가능합니다.")
 
     if find_user_by_email(request.email):
         raise HTTPException(status_code=400, detail="이메일이 이미 존재합니다.")
@@ -102,10 +107,10 @@ def signup(request: SignUpRequest):
         connection = get_connection()
         cursor = connection.cursor()
         query = (
-            "INSERT INTO user (email, password, name, mgmt_area, department) "
+            "INSERT INTO user_data (user_email, user_ps, user_name, jurisdiction, user_dept) "
             "VALUES (%s, %s, %s, %s, %s)"
         )
-        cursor.execute(query, (request.email, hashed_password, request.name, request.management_area, request.department))
+        cursor.execute(query, (request.email, hashed_password, request.name, request.jurisdiction, request.department))
         connection.commit()
     finally:
         if connection.is_connected():
@@ -114,24 +119,23 @@ def signup(request: SignUpRequest):
 
     return {"message": "회원가입에 성공하였습니다."}
 
-
 @router.post("/login")
 def login_user(request: LoginRequest):
     user = find_user_by_email(request.email)
     if not request.email.endswith("@gmail.com"):
-        raise HTTPException(status_code=400, detail="'@korea.kr' 형식만 가능합니다.")
+        raise HTTPException(status_code=400, detail="'@gmail.com' 형식만 가능합니다.")
 
     if not user:
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
-    if not verify_password(request.password, user['password']):
+    if not verify_password(request.password, user['user_ps']):
         raise HTTPException(status_code=400, detail="비밀번호가 올바르지 않습니다.")
 
     access_token = create_access_token(
-        data={"sub": user['email']}, expires_delta=timedelta(minutes=15)
+        data={"sub": user['user_email']}, expires_delta=timedelta(minutes=15)
     )
     refresh_token = create_refresh_token(
-        data={"sub": user['email']}, expires_delta=timedelta(hours=3)
+        data={"sub": user['user_email']}, expires_delta=timedelta(hours=3)
     )
 
     return {
@@ -139,7 +143,6 @@ def login_user(request: LoginRequest):
         "refresh_token": refresh_token,
         "token_type": "bearer"
     }
-
 
 @router.post("/logout")
 def logout(request: LogoutRequest):
@@ -154,7 +157,6 @@ def logout(request: LogoutRequest):
     add_token_to_blacklist(request.token, remaining_time)
     return {"message": "로그아웃 되었습니다."}
 
-
 @router.post("/refresh-token")
 def refresh_token(refresh_token: str):
     payload = verify_token(refresh_token)
@@ -166,10 +168,10 @@ def refresh_token(refresh_token: str):
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
     access_token = create_access_token(
-        data={"sub": user['email']}, expires_delta=timedelta(minutes=15)
+        data={"sub": user['user_email']}, expires_delta=timedelta(minutes=15)
     )
     new_refresh_token = create_refresh_token(
-        data={"sub": user['email']}, expires_delta=timedelta(hours=3)
+        data={"sub": user['user_email']}, expires_delta=timedelta(hours=3)
     )
 
     return {
@@ -189,7 +191,6 @@ def protected_route(token: str = Header(...)):
 
     return {"message": f"You are authenticated as {payload['sub']}."}
 
-
 @router.post("/findpwd")
 def findpwd(request: FindPasswordRequest):
     user = find_user_by_email(request.email)
@@ -204,7 +205,6 @@ def findpwd(request: FindPasswordRequest):
 
     return {"message": "인증번호가 이메일로 발송되었습니다."}
 
-
 @router.post("/verify-code")
 def verify_code(request: VerifyCodeRequest):
     if request.email not in verification_codes or verification_codes[request.email] != request.code:
@@ -215,7 +215,7 @@ def verify_code(request: VerifyCodeRequest):
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
 
     reset_token = create_access_token(
-        data={"sub": user['email'], "action": "password_reset"},
+        data={"sub": user['user_email'], "action": "password_reset"},
         expires_delta=timedelta(minutes=15)
     )
 
@@ -224,7 +224,6 @@ def verify_code(request: VerifyCodeRequest):
         "reset_token": reset_token,
     }
 
-  
 @router.post("/reset-password")
 def reset_password(request: ResetPasswordRequest):
     payload = verify_token(request.reset_token)
@@ -244,7 +243,7 @@ def reset_password(request: ResetPasswordRequest):
     try:
         connection = get_connection()
         cursor = connection.cursor()
-        query = "UPDATE user SET password = %s WHERE email = %s"
+        query = "UPDATE user_data SET user_ps = %s WHERE user_email = %s"
         cursor.execute(query, (hashed_password, email))
         connection.commit()
     finally:
