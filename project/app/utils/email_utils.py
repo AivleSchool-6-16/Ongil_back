@@ -8,10 +8,10 @@ def generate_verification_code():
 
 # 이메일 전송 함수
 def send_verification_email(email: str, code: str):
-    smtp_server = "smtp.yourdomain.com"
+    smtp_server = "smtp.gmail.com"
     smtp_port = 587
-    sender_email = "no-reply@yourdomain.com"
-    sender_password = "your_password"
+    sender_email = "ejji0001@gmail.com" # 보내는 메일
+    sender_password = "defn mnnr cwdm xoms" # - 보안 문제 
 
     message = MIMEText(f"인증번호: {code}")
     message["Subject"] = "비밀번호 복구 인증번호"
@@ -20,10 +20,14 @@ def send_verification_email(email: str, code: str):
 
     try:
         with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.ehlo()
             server.starttls()
             server.login(sender_email, sender_password)
             server.sendmail(sender_email, email, message.as_string())
+        print("Email sent successfully")
         return True
+    except smtplib.SMTPAuthenticationError as auth_error:
+        print(f"Authentication failed: {auth_error}")
     except Exception as e:
         print(f"Failed to send email: {e}")
-        return False
+    return False
