@@ -20,18 +20,6 @@ class SignUpRequest(BaseModel):
     name: str
     department: str
 
-    @field_validator("password")
-    def validate_password(cls, value):
-        if len(value) < 8 or not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c in "!@#$%^&*()" for c in value):
-            raise ValueError("8자리 이상, 대소문자 포함, !@#$%^&*() 중 하나 이상 포함")
-        return value
-
-    @field_validator("confirm_password")
-    def passwords_match(cls, value, values):
-        if "password" in values and value != values["password"]:
-            raise ValueError("비밀번호가 다릅니다.")
-        return value
-    
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str

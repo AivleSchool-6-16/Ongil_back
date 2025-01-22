@@ -226,8 +226,8 @@ def post_delete(post_id: int):
         cursor = conn.cursor()
 
         # (1) 게시글 삭제
-        delete_post_sql = "DELETE FROM post WHERE id = %s"
-        cursor.execute(delete_post_sql, (post_id,))
+        sql = "DELETE FROM post WHERE id = %s"
+        cursor.execute(sql, (post_id,))
         conn.commit()
 
         cursor.close()
