@@ -186,3 +186,28 @@ def delete_user(token: str = Header(...)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete user account."
         )
+
+@router.delete("/user_delete/{user_email}") # 회원탈퇴 임시
+def user_delete(email:str):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        sql = "DELETE FROM user_data WHERE user_email = %s"
+        cursor.execute(sql, (email,))
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": "회원 탈퇴 완료."
+        }
+
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="회원탈퇴 실패"
+        )
