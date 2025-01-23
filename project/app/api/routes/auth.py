@@ -150,7 +150,7 @@ def confirm_email(token: str = Query(...)):
             raise HTTPException(status_code=400, detail="유효하지 않은 토큰입니다.")
 
         # Redis에서 인증 상태 업데이트
-        redis_client.setex(f"verified:{email}", timedelta(hours=1), "true")
+        redis_client.setex(f"verified:{email}", timedelta(minutes=30), "true")
 
         # 성공 페이지 반환 - 로그인 페이지로 이동하도록 
         return HTMLResponse(content=f"""

@@ -8,10 +8,10 @@ import mysql.connector
 
 def get_connection():
     return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="password",
-        database="ongil"
+        host="ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com",
+        user="admin",     
+        password="aivle202406",
+        database="ongildb" 
     )
 
 router = APIRouter()

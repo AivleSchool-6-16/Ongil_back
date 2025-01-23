@@ -152,7 +152,7 @@ def update_user(email: str, update_data: Dict[str, str], token: str = Header(...
             detail="Failed to update user data." 
         )
 
-@router.delete("/delete_user")  # 회원 탈퇴
+@router.delete("/delete_user")  # 회원 탈퇴 
 def delete_user(token: str = Header(...)):
     try:
         if is_token_blacklisted(token):
