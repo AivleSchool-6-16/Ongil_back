@@ -49,8 +49,6 @@ class SignUpRequest(BaseModel):
     jurisdiction: str
     department: str
 
-<<<<<<< HEAD
-=======
     @field_validator("password")
     def validate_password(cls, value):
         if len(value) < 8 or not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c in "!@#$%^&*()" for c in value):
@@ -63,7 +61,6 @@ class SignUpRequest(BaseModel):
             raise ValueError("비밀번호가 다릅니다.")
         return value
 
->>>>>>> fb237701fd7cdcafc9c22087cf059cef34b2ea1e
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
