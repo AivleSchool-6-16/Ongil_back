@@ -2,11 +2,11 @@ from fastapi import FastAPI, Request, HTTPException, Depends
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from app.api.routes import auth, inquire, mypage
+from app.api.routes import admin, auth, board, inquire, mypage, roads
 from app.utils.token_blacklist import is_token_blacklisted
 from app.utils.jwt_utils import verify_token
 
-DATABASE_URL = "mysql+pymysql://root:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
+DATABASE_URL = "mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -35,6 +35,9 @@ async def check_token_blacklist(request: Request, call_next):
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(inquire.router, prefix="/inquire", tags=["Inquire"])
 app.include_router(mypage.router, prefix="/mypage", tags=["MyPage"])
+app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+app.include_router(roads.router, prefix="/roads", tags=["roads"])
+
 
 @app.get("/")
 def root():

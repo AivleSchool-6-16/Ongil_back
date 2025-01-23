@@ -3,16 +3,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import List, Optional
-from app.utils.jwt_utils import verify_token
 import mysql.connector
-
-def get_connection():
-    return mysql.connector.connect(
-        host="ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com",
-        user="admin",     
-        password="aivle202406",
-        database="ongildb" 
-    )
+from app.utils.jwt_utils import verify_token
+from app.db.mysql_connect import get_connection
 
 router = APIRouter()
 

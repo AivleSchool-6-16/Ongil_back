@@ -3,29 +3,14 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
 import redis
-import mysql.connector
 from mysql.connector import Error
+from app.db.mysql_connect import get_connection
 from app.utils.security import hash_password, verify_password
 from app.utils.email_utils import generate_verification_code, send_verification_email, send_signup_email
 from app.utils.jwt_utils import create_access_token, verify_token, create_refresh_token
 from app.utils.token_blacklist import add_token_to_blacklist, is_token_blacklisted
 
 router = APIRouter()
-
-# mysql 연결 
-def get_connection():
-    try:
-        connection = mysql.connector.connect(
-            host="ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com",
-            user="admin",
-            password="aivle202406",
-            database="ongildb"
-        )
-        if connection.is_connected():
-            return connection
-    except Error as e:
-        print(f"Error connecting to the database: {e}")
-        raise HTTPException(status_code=500, detail="Could not connect to the database.")
 
 # redis 연결
 try:
@@ -38,7 +23,6 @@ except Exception as e:
 
 # 인증번호 임시 저장 : 보안성(?)
 verification_codes = {}
-#signup_tokens = {}
 
 # requests 모델 정의
 class SignUpRequest(BaseModel):

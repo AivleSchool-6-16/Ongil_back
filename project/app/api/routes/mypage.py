@@ -2,29 +2,14 @@
 from fastapi import APIRouter, HTTPException, Header, status, Depends
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
-import redis
-import mysql.connector
-from mysql.connector import Error
-from app.utils.security import hash_password, verify_password
-from app.utils.jwt_utils import create_access_token, verify_token
-from app.utils.token_blacklist import is_token_blacklisted, add_token_to_blacklist
 import traceback
 from typing import Dict
-
-# mysql 연결 
-def get_connection():
-    try:
-        connection = mysql.connector.connect(
-            host="ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com",
-            user="admin",
-            password="aivle202406",
-            database="ongildb"
-        )
-        if connection.is_connected():
-            return connection
-    except Error as e:
-        print(f"Error connecting to the database: {e}")
-        raise HTTPException(status_code=500, detail="Could not connect to the database.")
+import mysql.connector
+from mysql.connector import Error
+from app.utils.security import verify_password
+from app.utils.jwt_utils import verify_token
+from app.utils.token_blacklist import is_token_blacklisted, add_token_to_blacklist
+from app.db.mysql_connect import get_connection
 
 
 def execute_query(query: str, params: tuple = ()): 
