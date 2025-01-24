@@ -14,24 +14,10 @@ class FileRequest(BaseModel):
     req_date: datetime
 
   
-def is_admin(email: str):
-    try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-        query = "SELECT is_admin FROM permissions WHERE user_email = %s"
-        cursor.execute(query, (email,))
-        result = cursor.fetchone()
-        return result and result["is_admin"]
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-
 @router.get("/file-requests")
 def get_file_requests(token: str = Depends(verify_token)):
-    user_email = token["sub"]
-    if not is_admin(user_email):
-        raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
+    if not token.get("admin"):
+        raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
 
     try:
         connection = get_connection()
@@ -47,9 +33,8 @@ def get_file_requests(token: str = Depends(verify_token)):
 
 @router.post("/file-requests/approve")
 def approve_file_request(req_id: str, token: str = Depends(verify_token)):
-    user_email = token["sub"]
-    if not is_admin(user_email):
-        raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
+    if not token.get("admin"):
+        raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
 
     try:
         connection = get_connection()
@@ -62,13 +47,12 @@ def approve_file_request(req_id: str, token: str = Depends(verify_token)):
             cursor.close()
             connection.close()
 
-    return {"message": "파일 요청이 승인되었습니다."}
+    return {"message": "파일 요청이 승인되었습니다."} # 이메일 전송으로 변경 필요, 전송 후 db 삭제
 
 @router.post("/file-requests/reject")
 def reject_file_request(req_id: str, token: str = Depends(verify_token)):
-    user_email = token["sub"]
-    if not is_admin(user_email):
-        raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
+    if not token.get("admin"):
+        raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
 
     try:
         connection = get_connection()
@@ -81,4 +65,4 @@ def reject_file_request(req_id: str, token: str = Depends(verify_token)):
             cursor.close()
             connection.close()
 
-    return {"message": "파일 요청이 거부되었습니다."}
+    return {"message": "파일이 거부되었습니다."}  # 이메일 전송으로 변경 필요, 전송 후 db 삭제

@@ -94,6 +94,21 @@ def find_user_by_email(email: str):
         if 'connection' in locals() and connection.is_connected(): 
             connection.close()
 
+# 관리자 확인      
+def is_admin(email: str):
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        query = "SELECT is_admin FROM permissions WHERE user_email = %s"
+        cursor.execute(query, (email,))
+        result = cursor.fetchone()
+        return result and result["is_admin"]
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
 
 # 1. 이메일 중복 및 형식 확인
 @router.post("/signup/check-email")
@@ -185,28 +200,30 @@ def complete_signup(request: SignUpRequest):
 
 # 로그인 
 @router.post("/login")
-def login_user(request: LoginRequest):
-    user = find_user_by_email(request.email)
-    if not request.email.endswith("@gmail.com"):
-        raise HTTPException(status_code=400, detail="'@gmail.com' 형식만 가능합니다.")
-
+def login_user(email: str, password: str):
+    user = find_user_by_email(email)
     if not user:
-        raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
-
-    if not verify_password(request.password, user['user_ps']):
-        raise HTTPException(status_code=400, detail="비밀번호가 올바르지 않습니다.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    if not verify_password(password, user["user_ps"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials.")
+    
+    # 관리자 확인 
+    is_admin_user = is_admin(email)
+    
+    # Create tokens
     access_token = create_access_token(
-        data={"sub": user['user_email']}, expires_delta=timedelta(minutes=15)
+        data={"sub": email, "admin": is_admin_user}, expires_delta=timedelta(minutes=30)
     )
     refresh_token = create_refresh_token(
-        data={"sub": user['user_email']}, expires_delta=timedelta(hours=3)
+        data={"sub": email}, expires_delta=timedelta(days=7)
     )
 
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
+        "is_admin": is_admin_user
     }
 
 # 로그아웃 
@@ -224,27 +241,27 @@ def logout(request: LogoutRequest):
     return {"message": "로그아웃 되었습니다."}
 
 # refresh token으로 access token 요청 
-@router.post("/refresh-token")
+@router.post("/refresh")
 def refresh_token(refresh_token: str):
-    payload = verify_token(refresh_token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
-
-    user = find_user_by_email(payload["sub"])
-    if not user:
-        raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
-
-    access_token = create_access_token(
-        data={"sub": user['user_email']}, expires_delta=timedelta(minutes=15)
-    )
-    new_refresh_token = create_refresh_token(
-        data={"sub": user['user_email']}, expires_delta=timedelta(hours=3)
+    # Decode and validate the refresh token
+    decoded_token = verify_token(refresh_token, token_type="refresh")
+    email = decoded_token.get("sub")
+    
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid refresh token.")
+    
+    # 관리자 체크 
+    is_admin_user = is_admin(email)
+    
+    # 새 토큰 발급 
+    new_access_token = create_access_token(
+        data={"sub": email, "admin": is_admin_user}, expires_delta=timedelta(minutes=15)
     )
 
     return {
-        "access_token": access_token,
-        "refresh_token": new_refresh_token,
-        "token_type": "bearer"
+        "access_token": new_access_token,
+        "token_type": "bearer",
+        "is_admin": is_admin_user
     }
 
 # 토큰 확인 

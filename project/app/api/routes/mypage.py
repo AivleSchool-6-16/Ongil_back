@@ -4,8 +4,6 @@ from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
 import traceback
 from typing import Dict
-import mysql.connector
-from mysql.connector import Error
 from app.utils.security import verify_password
 from app.utils.jwt_utils import verify_token
 from app.utils.token_blacklist import is_token_blacklisted, add_token_to_blacklist
