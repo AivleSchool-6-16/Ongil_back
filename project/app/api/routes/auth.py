@@ -15,8 +15,6 @@ router = APIRouter()
 # redis 연결
 try:
     redis_client = redis.StrictRedis(host="localhost", port=6379, db=0)
-    redis_client.ping()
-    print("Connected to Redis")
 except Exception as e:
     print(f"Redis connection failed: {e}")
     redis_client = None
@@ -171,7 +169,7 @@ def confirm_email(token: str = Query(...)):
         </html>
         """, status_code=400)
 
-# 4. 회원가입 완료
+# ✅ 4. 회원가입 완료
 @router.post("/signup/complete")
 def complete_signup(request: SignUpRequest):
     if not redis_client.get(f"verified:{request.email}"):
@@ -207,10 +205,10 @@ def login_user(request: LoginRequest):
     if not verify_password(request.password, user["user_ps"]):
         raise HTTPException(status_code=401, detail="Invalid credentials.")
 
-    # ✅ 관리자 확인
+    # 관리자 확인
     is_admin_user = is_admin(request.email)
 
-    # ✅ JWT 토큰 생성 (Access & Refresh)
+    # JWT 토큰 생성 (Access & Refresh)
     access_token = create_access_token(
         data={"sub": request.email, "admin": is_admin_user}, expires_delta=timedelta(minutes=30)
     )
@@ -225,9 +223,10 @@ def login_user(request: LoginRequest):
         "is_admin": is_admin_user
     }
 
-# 로그아웃 
+# ✅ 로그아웃 
 @router.post("/logout")
 def logout(request: LogoutRequest):
+    """logout"""
     payload = verify_token(request.token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token.")
@@ -239,10 +238,10 @@ def logout(request: LogoutRequest):
     add_token_to_blacklist(request.token, remaining_time)
     return {"message": "로그아웃 되었습니다."}
 
-# refresh token으로 access token 요청 
+# ✅ refresh token으로 access token 요청 
 @router.post("/refresh")
 def refresh_token(refresh_token: str):
-    # Decode and validate the refresh token
+    """refresh 토큰 요청"""
     decoded_token = verify_token(refresh_token, token_type="refresh")
     email = decoded_token.get("sub")
     
@@ -266,6 +265,7 @@ def refresh_token(refresh_token: str):
 # 토큰 확인 
 @router.get("/protected")
 def protected_route(token: str = Header(...)):
+    """토큰 확인하기 - debugging용"""
     if is_token_blacklisted(token):
         raise HTTPException(status_code=401, detail="Token is blacklisted.")
 
@@ -275,9 +275,10 @@ def protected_route(token: str = Header(...)):
 
     return {"message": f"You are authenticated as {payload['sub']}."}
 
-# 비밀번호 찾기 
+# ✅ 비밀번호 찾기 
 @router.post("/findpwd")
 def findpwd(request: EmailCheckRequest):
+    """비밀번호 재설정 위한 인증번호 이메일로 보내기"""
     user = find_user_by_email(request.email)
     if not user:
         raise HTTPException(status_code=400, detail="존재하지 않는 이메일입니다.")
@@ -290,9 +291,10 @@ def findpwd(request: EmailCheckRequest):
 
     return {"message": "인증번호가 이메일로 발송되었습니다."}
 
-# 비밀번호 인증 코드 확인 
+# ✅ 비밀번호 인증 코드 확인 
 @router.post("/verify-code")
 def verify_code(request: VerifyCodeRequest):
+    """인증번호 입력 후 확인"""
     if request.email not in verification_codes or verification_codes[request.email] != request.code:
         raise HTTPException(status_code=400, detail="유효하지 않은 인증번호입니다.")
 
@@ -310,9 +312,10 @@ def verify_code(request: VerifyCodeRequest):
         "reset_token": reset_token,
     }
 
-# 비밀번호 재설정 
+# ✅ 비밀번호 재설정 
 @router.post("/reset-password")
 def reset_password(request: ResetPasswordRequest):
+    """비밀번호 재설정하기"""
     payload = verify_token(request.reset_token)
     if not payload or payload.get("action") != "password_reset":
         raise HTTPException(status_code=401, detail="Invalid reset token.")

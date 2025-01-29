@@ -2,6 +2,8 @@ import random
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.message import EmailMessage
+import os
 
 # 인증번호 생성 함수
 def generate_verification_code():
@@ -70,3 +72,34 @@ def send_signup_email(email: str, token: str):
     except Exception as e:
         print(f"Failed to send email: {e}")
         return False
+    
+def send_file_email(to_email: str, subject: str, body: str, attachment_path: str = None):
+    """Send an email with an optional file attachment (CSV)."""
+    smtp_server = "smtp.gmail.com" # 받는 메일 
+    smtp_port = 587
+    sender_email = "ejji0001@gmail.com" # 보내는 메일
+    sender_password = "defn mnnr cwdm xoms"
+    
+    msg = EmailMessage()
+    msg["From"] = sender_email
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    # ✅ Attach file if provided
+    if attachment_path:
+        try:
+            with open(attachment_path, "rb") as file:
+                msg.add_attachment(file.read(), maintype="application", subtype="octet-stream", filename=os.path.basename(attachment_path))
+        except FileNotFoundError:
+            raise ValueError(f"❌ File not found: {attachment_path}")
+
+    # ✅ Send email
+    try:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()  # Secure connection
+            server.login(sender_email, sender_password)  # Login
+            server.send_message(msg)
+        print(f"✅ Email sent to {to_email}")
+    except Exception as e:
+        print(f"❌ Email sending failed: {e}")

@@ -1,13 +1,8 @@
 import redis
 
 # Connect to Redis
-#redis_client = redis.StrictRedis(host="localhost", port=6379, db=0)
 try:
     redis_client = redis.StrictRedis(host="localhost", port=6379, db=0)
-    
-    # Test the connection
-    redis_client.ping()
-    print("Connected to Redis")
 except Exception as e:
     print(f"Redis connection failed: {e}")
     redis_client = None 

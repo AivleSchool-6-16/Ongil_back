@@ -8,9 +8,7 @@ from datetime import datetime
 import redis
 import os
 from app.db.mysql_connect import get_connection
-from app.utils.jwt_utils import verify_token
-from app.utils.token_blacklist import is_token_blacklisted
-from app.db.mysql_connect import get_connection
+from app.utils.jwt_utils import verify_token, get_authenticated_user
 
 router = APIRouter()
 
@@ -21,44 +19,31 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 try:
     redis_client = redis.StrictRedis(host="localhost", port=6379, db=0, decode_responses=True)
-    redis_client.ping()
-    print("Connected to Redis")
 except Exception as e:
     print(f"Redis connection failed: {e}")
     redis_client = None
 
 
-# 📌 게시글 등록 요청 모델
+# 게시글 등록 요청 모델
 class PostCreateRequest(BaseModel):
     board_id: int  # 0: 비밀글, 1: 공개글
     post_title: str
     post_category: int
     post_text: str
 
-# 📌 게시글 수정 요청 모델
+# 게시글 수정 요청 모델
 class PostUpdateRequest(BaseModel):
     post_title: Optional[str] = None
     post_category: Optional[int] = None
     post_text: Optional[str] = None
 
-# 📌 댓글 등록 요청 모델
+# 댓글 등록 요청 모델
 class CommentRequest(BaseModel):
     comment: str
 
-# 📌 관리자 답변 요청 모델
+# 관리자 답변 요청 모델
 class AnswerRequest(BaseModel):
     answer: str
-
-# ✅ 토큰 검증 함수
-def get_authenticated_user(token: str = Header(...)):
-    if is_token_blacklisted(token):
-        raise HTTPException(status_code=401, detail="Token is blacklisted.")
-
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token.")
-
-    return payload
 
 # ✅ 1. 전체 게시글 조회 (조회수 실시간 반영)
 @router.get("/")
@@ -106,7 +91,7 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user), backgro
 
         # 실시간 조회수 반영
         redis_views = int(redis_client.get(redis_key)) if redis_client.get(redis_key) else 0
-        post["views"] += redis_views
+        post["views"] += redis_views # MySQL 값 + Redis 값
 
         return {"post": post}
     finally:
@@ -115,16 +100,9 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user), backgro
 
 # ✅ 3. 게시글 작성
 @router.post("/")
-def create_post(
-    request: PostCreateRequest,
-    token: str = Header(...)
-):
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token.")
-
-    connection = None  # ✅ 초기화
-    cursor = None      # ✅ 초기화
+def create_post(request: PostCreateRequest, user: dict = Depends(get_authenticated_user)):
+    connection = None 
+    cursor = None      
 
     try:
         connection = get_connection()
@@ -134,7 +112,7 @@ def create_post(
         INSERT INTO Posts (board_id, user_email, post_title, post_category, post_text, post_time, views)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
-        cursor.execute(query, (request.board_id, payload["sub"], request.post_title, request.post_category, request.post_text, datetime.now(), 0))
+        cursor.execute(query, (request.board_id, user["sub"], request.post_title, request.post_category, request.post_text, datetime.now(), 0))
         connection.commit()
 
         return {"message": "게시글이 등록되었습니다."}
@@ -143,9 +121,9 @@ def create_post(
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
     finally:
-        if cursor is not None:  # ✅ cursor가 None이 아닐 때만 닫기
+        if cursor is not None:  # cursor가 None이 아닐 때만 닫기
             cursor.close()
-        if connection is not None:  # ✅ connection도 None 체크 후 닫기
+        if connection is not None:  # connection도 None 체크 후 닫기
             connection.close()
 
 # ✅ 4. 게시글 수정
@@ -215,7 +193,7 @@ def search_posts(
         cursor.execute(query, tuple(params))
         results = cursor.fetchall()
 
-        # ✅ Redis에서 실시간 조회수 반영
+        # Redis에서 실시간 조회수 반영
         for post in results:
             redis_key = f"post_views:{post['post_id']}"
             redis_views = redis_client.get(redis_key)
@@ -263,25 +241,25 @@ def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_au
         cursor.close()
         connection.close()
         
-# 파일 업로드 - 게시글 작성 혹은 수정 중에만
+# ✅ 파일 업로드 - 게시글 작성 혹은 수정 중에만
 @router.post("/{post_id}/upload")
 def upload_file(post_id: int, file: UploadFile = File(...), user: dict = Depends(verify_token)):
     try:
-        # ✅ Validate file size (Example: Max 10MB)
+        # Validate file size (Example: Max 10MB)
         MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
         file_size = file.file.seek(0, 2)  # Get file size
         file.file.seek(0)  # Reset file pointer
         if file_size > MAX_FILE_SIZE:
             raise HTTPException(status_code=400, detail="File size exceeds 10MB limit.")
 
-        # ✅ Construct file path
+        # Construct file path
         file_location = os.path.join(UPLOAD_FOLDER, file.filename)
 
-        # ✅ Save file to disk
+        # Save file to disk
         with open(file_location, "wb") as f:
             f.write(file.file.read())
 
-        # ✅ Save file metadata to DB
+        # Save file metadata to DB
         connection = get_connection()
         cursor = connection.cursor()
 
@@ -298,7 +276,7 @@ def upload_file(post_id: int, file: UploadFile = File(...), user: dict = Depends
         connection.close()
 
 
-# 게시글의 파일 목록 가져오기  
+# ✅ 게시글의 파일 목록 가져오기  
 @router.get("/{post_id}/files")
 def get_post_files(post_id: int):
     try:
@@ -312,13 +290,13 @@ def get_post_files(post_id: int):
         cursor.execute(query, (post_id,))
         files = cursor.fetchall()
 
-        # ✅ Check if files exist, delete from DB if missing
+        # Check if files exist, delete from DB if missing
         valid_files = []
         for file in files:
             if os.path.exists(file["file_path"]):
                 valid_files.append(file)
             else:
-                # ✅ Remove missing file entry from DB
+                # Remove missing file entry from DB
                 delete_query = "DELETE FROM file_metadata WHERE file_id = %s"
                 cursor.execute(delete_query, (file["file_id"],))
                 connection.commit()
@@ -331,7 +309,7 @@ def get_post_files(post_id: int):
         cursor.close()
         connection.close()
         
-# 파일 다운로드 
+# ✅ 파일 다운로드 
 @router.get("/files/{file_id}/download")
 def download_file(file_id: int):
     try:
@@ -345,9 +323,9 @@ def download_file(file_id: int):
         if not file:
             raise HTTPException(status_code=404, detail="File metadata not found.")
 
-        # ✅ Check if file exists
+        # Check if file exists
         if not os.path.exists(file["file_path"]):
-            # ✅ Delete the file entry from the database if missing
+            # Delete the file entry from the database if missing
             delete_query = "DELETE FROM file_metadata WHERE file_id = %s"
             cursor.execute(delete_query, (file_id,))
             connection.commit()
@@ -363,14 +341,14 @@ def download_file(file_id: int):
         connection.close()
 
 
-# 파일 삭제 - 게시글 작성 혹은 수정 중에만   
+# ✅ 파일 삭제 - 게시글 작성 혹은 수정 중에만   
 @router.delete("/files/{file_id}")
 def delete_file(file_id: int, user: dict = Depends(verify_token)):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # ✅ Retrieve file details
+        # Retrieve file details
         query = "SELECT file_path, user_email FROM file_metadata WHERE file_id = %s"
         cursor.execute(query, (file_id,))
         file = cursor.fetchone()
@@ -378,15 +356,15 @@ def delete_file(file_id: int, user: dict = Depends(verify_token)):
         if not file:
             raise HTTPException(status_code=404, detail="File not found.")
 
-        # ✅ Check if user is authorized to delete
+        # Check if user is authorized to delete
         if file["user_email"] != user["sub"] and not user.get("admin"):
             raise HTTPException(status_code=403, detail="You do not have permission to delete this file.")
 
-        # ✅ Delete the actual file from the disk
+        # Delete the actual file from the disk
         if os.path.exists(file["file_path"]):
             os.remove(file["file_path"])
 
-        # ✅ Remove file metadata from the database
+        # Remove file metadata from the database
         delete_query = "DELETE FROM file_metadata WHERE file_id = %s"
         cursor.execute(delete_query, (file_id,))
         connection.commit()

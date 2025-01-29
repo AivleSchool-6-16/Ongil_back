@@ -1,73 +1,156 @@
 # 열선 도로 추천 
-import uuid
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List
+import redis
+import json
 from app.utils.jwt_utils import verify_token
 from app.db.mysql_connect import get_connection
+from app.models.model import load_data, train_model
 
 
 router = APIRouter()
 
-class RoadRecommendationResponse(BaseModel):
-    rank: int
-    road_name: str
-    freezing_index: int
-    traffic_volume: int
+# Connect to Redis for caching recommendations
+try:
+    redis_client = redis.StrictRedis(host="localhost", port=6379, db=0, decode_responses=True)
+except Exception as e:
+    print(f"Redis connection failed: {e}")
+    redis_client = None
 
-# 동 입력받기 - db 정리 후 query 고쳐야 함.
-def fetch_top_roads(district: str):
+# User input model
+class UserInput(BaseModel):
+    region: str
+    rd_slope_weight: float = 4.0
+    acc_occ_weight: float = 3.0
+    acc_sc_weight: float = 3.0
+    
+# ✅ 지역 지정 
+@router.get("/get_district")
+def get_district(district: str, user: dict = Depends(verify_token)):
+    """Check if the district (읍면동) exists in road_info"""
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
-        query = """
-            SELECT road_name, freezing_index, traffic_volume 
-            FROM road_info 
-            WHERE district = %s 
-            ORDER BY freezing_index DESC 
-            LIMIT 3
-        """
+        query = "SELECT COUNT(*) AS count FROM road_info WHERE rds_rg = %s"
         cursor.execute(query, (district,))
-        roads = cursor.fetchall()
-        return roads
+        result = cursor.fetchone()
+
+        if result["count"] == 0:
+            raise HTTPException(status_code=404, detail=f"'{district}' 지역의 도로 정보가 없습니다.")
+
+        return {"message": f"'{district}' 지역이 선택되었습니다."}
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        cursor.close()
+        connection.close()
+        
+# ✅ 열선 도로 추천
+@router.post("/recommend")
+def road_recommendations(input_data: UserInput, user: dict = Depends(verify_token)):
+    """가중치를 적용하여 추천 점수를 계산하고 json형식으로 로그 저장(상위10개)"""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
 
-@router.get("/recommendations", response_model=List[RoadRecommendationResponse]) # db 수정 후 수정 
-def get_road_recommendations(district: str):
-    roads = fetch_top_roads(district)
-    if not roads:
-        raise HTTPException(status_code=404, detail="해당 지역에 대한 열선도로 정보가 없습니다.")
+        # 지역 필터링
+        query = "SELECT * FROM road_info WHERE rds_rg = %s"
+        cursor.execute(query, (input_data.region,))
+        roads = cursor.fetchall()
 
-    return [
-        {"rank": i + 1, "road_name": road["road_name"], "freezing_index": road["freezing_index"], "traffic_volume": road["traffic_volume"]}
-        for i, road in enumerate(roads)
-    ]
+        if not roads:
+            raise HTTPException(status_code=404, detail=f"'{input_data.region}'에 해당하는 도로 데이터가 없습니다.")
 
-# 파일 요청
-@router.post("/file-request")
-def request_road_file(district: str, token: str = Depends(verify_token)):
-    """
-    도로 파일 요청 등록 API
-    """
-    user_email = token["sub"]
-    req_id = f"REQ{uuid.uuid4().hex[:8].upper()}"  # 고유한 req_id 생성
+        # Apply user-defined weights
+        recommended_roads = []
+        for road in roads:
+            pred_idx = (
+                road["rd_slope"] * input_data.rd_slope_weight +
+                road["acc_occ"] * input_data.acc_occ_weight +
+                road["acc_sc"] * input_data.acc_sc_weight
+            )
+            recommended_roads.append({
+                "road_id": road["road_id"],
+                "road_name": road["road_name"],
+                "rbp": road["rbp"],  # 시점
+                "rep": road["rep"],  # 종점
+                "rd_slope": road["rd_slope"],
+                "acc_occ": road["acc_occ"],
+                "acc_sc": road["acc_sc"],
+                "pred_idx": pred_idx
+            })
 
+        # Sort and select top 10 roads
+        recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"], reverse=True)[:10]
+
+        # Convert list to JSON format
+        recommended_roads_json = json.dumps(recommended_roads, ensure_ascii=False)
+
+        # Cache recommendations in Redis
+        redis_key = f"recommendations:{user['sub']}:{input_data.region}"
+        redis_client.setex(redis_key, 600, recommended_roads_json)  # Cache for 10 minutes
+
+        # Store single log with JSON data
+        log_query = """
+        INSERT INTO rec_road_log (user_email, recommended_roads)
+        VALUES (%s, %s)
+        """
+        cursor.execute(log_query, (user["sub"], recommended_roads_json))
+        connection.commit()
+
+        return {"recommended_roads": recommended_roads}
+    finally:
+        cursor.close()
+        connection.close()
+
+# ✅ 추천 로그 확인 
+@router.get("/recommendations/log")
+def get_recommendation_logs(user: dict = Depends(verify_token)):
+    """Retrieve past recommendations stored in JSON format"""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        query = """
+        SELECT log_id, c_date, recommended_roads, ask_check
+        FROM rec_road_log
+        WHERE user_email = %s
+        ORDER BY c_date DESC
+        """
+        cursor.execute(query, (user["sub"],))
+        logs = cursor.fetchall()
+
+        # Convert JSON string to Python list before returning
+        for log in logs:
+            log["recommended_roads"] = json.loads(log["recommended_roads"])
+
+        return {"recommendation_logs": logs}
+    finally:
+        cursor.close()
+        connection.close()
+
+
+# ✅ 파일 요청 
+@router.post("/file-request/{log_id}")
+def request_road_file(log_id: int, user: dict = Depends(verify_token)):
+    """파일 요청 api - rec_road_log의 ask_check로 확인"""
     try:
         connection = get_connection()
         cursor = connection.cursor()
-        query = """
-            INSERT INTO req_file (req_id, user_email, confirm, req_date) 
-            VALUES (%s, %s, %s, NOW())
-        """
-        cursor.execute(query, (req_id, user_email, 0))  # confirm = 0으로 설정
-        connection.commit()
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        # Check if log_id exists and belongs to the user
+        query = "SELECT * FROM rec_road_log WHERE log_id = %s AND user_email = %s"
+        cursor.execute(query, (log_id, user["sub"]))
+        log_entry = cursor.fetchone()
 
-    return {"message": "파일 요청이 성공적으로 등록되었습니다.", "req_id": req_id}
+        if not log_entry:
+            raise HTTPException(status_code=404, detail="추천 로그를 찾을 수 없거나 권한이 없습니다.")
+
+        # ask_check 0 to 1으로 업데이트 
+        update_query = "UPDATE rec_road_log SET ask_check = 1 WHERE log_id = %s"
+        cursor.execute(update_query, (log_id,))
+        connection.commit()
+
+        return {"message": f"파일 요청이 등록되었습니다 (log_id: {log_id})."}
+    finally:
+        cursor.close()
+        connection.close()

@@ -1,7 +1,7 @@
 # mypage - 정보 조회, 수정, 탈퇴 
-from fastapi import APIRouter, HTTPException, Header, status, Depends
-from pydantic import BaseModel, EmailStr, field_validator
-from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Header, status
+from pydantic import EmailStr, field_validator
+from datetime import datetime, timezone
 import traceback
 from typing import Dict
 from app.utils.security import verify_password, hash_password
@@ -39,13 +39,13 @@ router = APIRouter()
 @router.get("/mypage_load")
 def mypage_load(token: str = Header(...)):
     try:
-        # ✅ Check if token is valid and extract email
+        # Check if token is valid and extract email
         if is_token_blacklisted(token):
             raise HTTPException(status_code=401, detail="Token is invalid or expired.")
 
         user_email = verify_token(token).get("sub")
 
-        # ✅ Fetch user details
+        # Fetch user details
         query = "SELECT user_email, user_name, user_dept, jurisdiction FROM user_data WHERE user_email = %s"
         user_info = execute_query(query, (user_email,))
 
@@ -63,13 +63,12 @@ def mypage_load(token: str = Header(...)):
 @router.get("/check_password")
 def check_password(password: str, token: str = Header(...)):
     try:
-        # ✅ Check if token is valid and extract email
         if is_token_blacklisted(token):
             raise HTTPException(status_code=401, detail="Token is invalid or expired.")
 
         user_email = verify_token(token).get("sub")
 
-        # ✅ Get the stored hashed password
+        # Get the stored hashed password
         query_user = "SELECT user_ps FROM user_data WHERE user_email = %s"
         user_record = execute_query(query_user, (user_email,))
 
@@ -78,11 +77,11 @@ def check_password(password: str, token: str = Header(...)):
 
         db_hashed_ps = user_record[0]['user_ps']
 
-        # ✅ Verify password using bcrypt
+        # Verify password using bcrypt
         if not verify_password(password, db_hashed_ps):
             raise HTTPException(status_code=400, detail="Incorrect password.")
 
-        return {"message": "Password matches."}
+        return {"message": "비밀번호가 확인되었습니다."}
     except Exception:
         traceback.print_exc()
         raise HTTPException(
@@ -92,8 +91,8 @@ def check_password(password: str, token: str = Header(...)):
 
 @router.put("/update_user")
 def update_user(update_data: Dict[str, str], token: str = Header(...)):
+    """user_ps, user_dept, jurisdiction만 가능"""
     try:
-        # ✅ Check if token is valid and extract email
         if is_token_blacklisted(token):
             raise HTTPException(status_code=401, detail="Token is invalid or expired.")
 
@@ -101,7 +100,7 @@ def update_user(update_data: Dict[str, str], token: str = Header(...)):
 
         allowed_columns = {"user_ps", "user_dept", "jurisdiction"}
 
-        # ✅ Extract only allowed fields
+        # Extract only allowed fields
         filtered_data = {key: value for key, value in update_data.items() if key in allowed_columns}
 
         if not filtered_data:
@@ -110,17 +109,17 @@ def update_user(update_data: Dict[str, str], token: str = Header(...)):
                 detail="No valid fields to update."
             )
 
-        # ✅ Hash password if it is being updated
+        # user_ps이면 Hash password 
         if "user_ps" in filtered_data:
             filtered_data["user_ps"] = hash_password(filtered_data["user_ps"])
 
-        # ✅ Generate dynamic SQL query
+        # Generate dynamic SQL query
         set_clause = ", ".join([f"{key} = %s" for key in filtered_data.keys()])
         values = list(filtered_data.values()) + [user_email]
 
         query = f"UPDATE user_data SET {set_clause} WHERE user_email = %s"
 
-        # ✅ Execute update query
+        # Execute update query
         execute_query(query, tuple(values))
 
         return {
