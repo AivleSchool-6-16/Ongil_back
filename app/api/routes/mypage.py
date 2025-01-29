@@ -4,10 +4,10 @@ from pydantic import EmailStr, field_validator
 from datetime import datetime, timezone
 import traceback
 from typing import Dict
-from app.utils.security import verify_password, hash_password
-from app.utils.jwt_utils import verify_token
-from app.utils.token_blacklist import is_token_blacklisted, add_token_to_blacklist
-from app.db.mysql_connect import get_connection
+from app.core.security import verify_password, hash_password
+from app.core.jwt_utils import verify_token
+from app.core.token_blacklist import is_token_blacklisted, add_token_to_blacklist
+from app.database.mysql_connect import get_connection
 
 
 def execute_query(query: str, params: tuple = ()): 

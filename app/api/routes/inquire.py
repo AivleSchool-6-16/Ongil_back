@@ -4,8 +4,8 @@ from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import List, Optional
 import mysql.connector
-from app.utils.jwt_utils import verify_token
-from app.db.mysql_connect import get_connection
+from app.core.jwt_utils import verify_token
+from app.database.mysql_connect import get_connection
 
 router = APIRouter()
 

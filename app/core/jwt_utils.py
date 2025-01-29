@@ -3,7 +3,7 @@ from jose import jwt, JWTError
 import os
 from dotenv import load_dotenv
 from fastapi import Header, HTTPException
-from app.utils.token_blacklist import is_token_blacklisted
+from app.core.token_blacklist import is_token_blacklisted
 
 load_dotenv() 
 SECRET_KEY = os.getenv("SECRET_KEY")

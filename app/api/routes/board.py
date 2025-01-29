@@ -7,12 +7,12 @@ from typing import Optional
 from datetime import datetime
 import redis
 import os
-from app.db.mysql_connect import get_connection
-from app.utils.jwt_utils import verify_token, get_authenticated_user
+from app.database.mysql_connect import get_connection
+from app.core.jwt_utils import verify_token, get_authenticated_user
 
 router = APIRouter()
 
-UPLOAD_FOLDER = "app/db/uploads/"
+UPLOAD_FOLDER = "app/database/uploads/"
 # 파일 없을 경우
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)

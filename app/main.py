@@ -6,9 +6,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 
 from app.api.routes import admin, auth, board, mypage, roads
-from app.utils.token_blacklist import is_token_blacklisted
-from app.utils.jwt_utils import verify_token
-from app.db.sync_views import sync_redis_to_mysql
+from app.core.token_blacklist import is_token_blacklisted
+from app.core.jwt_utils import verify_token
+from app.services.sync_views import sync_redis_to_mysql
 
 DATABASE_URL = "mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
 

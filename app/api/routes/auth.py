@@ -4,11 +4,11 @@ from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
 import redis
 from mysql.connector import Error
-from app.db.mysql_connect import get_connection
-from app.utils.security import hash_password, verify_password
-from app.utils.email_utils import generate_verification_code, send_verification_email, send_signup_email
-from app.utils.jwt_utils import create_access_token, verify_token, create_refresh_token
-from app.utils.token_blacklist import add_token_to_blacklist, is_token_blacklisted
+from app.database.mysql_connect import get_connection
+from app.core.security import hash_password, verify_password
+from app.core.email_utils import generate_verification_code, send_verification_email, send_signup_email
+from app.core.jwt_utils import create_access_token, verify_token, create_refresh_token
+from app.core.token_blacklist import add_token_to_blacklist, is_token_blacklisted
 
 router = APIRouter()
 

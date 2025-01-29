@@ -5,8 +5,8 @@ from datetime import datetime
 from typing import List
 import redis
 import json
-from app.utils.jwt_utils import verify_token
-from app.db.mysql_connect import get_connection
+from app.core.jwt_utils import verify_token
+from app.database.mysql_connect import get_connection
 from app.models.model import load_data, train_model
 
 

@@ -5,9 +5,9 @@ from datetime import datetime
 import csv
 import json
 import os
-from app.utils.jwt_utils import verify_token
-from app.db.mysql_connect import get_connection
-from app.utils.email_utils import send_file_email
+from app.core.jwt_utils import verify_token
+from app.database.mysql_connect import get_connection
+from app.core.email_utils import send_file_email
 
 router = APIRouter()
 
