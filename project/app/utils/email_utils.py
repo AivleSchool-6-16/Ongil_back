@@ -9,7 +9,7 @@ def generate_verification_code():
 
 # 비밀번호 복구 메일 
 def send_verification_email(email: str, code: str):
-    smtp_server = "smtp.gmail.com"
+    smtp_server = "smtp.gmail.com" # 받는 메일 
     smtp_port = 587
     sender_email = "ejji0001@gmail.com" # 보내는 메일
     sender_password = "defn mnnr cwdm xoms" # - 보안 문제 

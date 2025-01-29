@@ -109,7 +109,6 @@ def is_admin(email: str):
             connection.close()
 
 
-
 # 1. 이메일 중복 및 형식 확인
 @router.post("/signup/check-email")
 def check_email(request: EmailCheckRequest):
@@ -198,25 +197,25 @@ def complete_signup(request: SignUpRequest):
 
     return {"message": "회원가입이 완료되었습니다."}
 
-# 로그인 
+# ✅ 로그인 API
 @router.post("/login")
-def login_user(email: str, password: str):
-    user = find_user_by_email(email)
+def login_user(request: LoginRequest):
+    user = find_user_by_email(request.email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
-    
-    if not verify_password(password, user["user_ps"]):
+
+    if not verify_password(request.password, user["user_ps"]):
         raise HTTPException(status_code=401, detail="Invalid credentials.")
-    
-    # 관리자 확인 
-    is_admin_user = is_admin(email)
-    
-    # Create tokens
+
+    # ✅ 관리자 확인
+    is_admin_user = is_admin(request.email)
+
+    # ✅ JWT 토큰 생성 (Access & Refresh)
     access_token = create_access_token(
-        data={"sub": email, "admin": is_admin_user}, expires_delta=timedelta(minutes=30)
+        data={"sub": request.email, "admin": is_admin_user}, expires_delta=timedelta(minutes=30)
     )
     refresh_token = create_refresh_token(
-        data={"sub": email}, expires_delta=timedelta(days=7)
+        data={"sub": request.email}, expires_delta=timedelta(days=7)
     )
 
     return {

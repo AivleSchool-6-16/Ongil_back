@@ -9,3 +9,4 @@ passlib
 redis
 email-validator
 mysql-connector-python
+python-multipart
