@@ -1,5 +1,5 @@
 # 문의 게시판
-from fastapi import APIRouter, HTTPException, Depends, Header, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi import File, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -7,6 +7,10 @@ from typing import Optional
 from datetime import datetime
 import redis
 import os
+import asyncio
+import socketio
+from urllib.parse import parse_qs
+
 from app.database.mysql_connect import get_connection
 from app.core.jwt_utils import verify_token, get_authenticated_user
 
@@ -22,6 +26,54 @@ try:
 except Exception as e:
     print(f"Redis connection failed: {e}")
     redis_client = None
+    
+# 📌 WebSocket (Socket.IO) 설정
+sio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins=["*"],  # 모든 CORS 허용
+)
+socket_app = socketio.ASGIApp(sio)
+
+
+# 실시간 게시판 데이터 저장 (임시)
+active_connections = []
+
+# ✅ 1. WebSocket 연결 관리
+@sio.event
+async def connect(sid, environ):
+    query_params = parse_qs(environ.get("QUERY_STRING", ""))  # ✅ URL에서 Query Parameter 파싱
+    token = query_params.get("token", [None])[0]  # `token` 값 가져오기
+
+    if not token:
+        print("❌ WebSocket 인증 실패: 토큰 없음")
+        await sio.disconnect(sid)
+        return
+
+    payload = verify_token(token)  # ✅ JWT 검증
+    if not payload:
+        print("❌ WebSocket 인증 실패: 유효하지 않은 토큰")
+        await sio.disconnect(sid)
+        return
+
+    print(f"✅ WebSocket 인증 성공: {payload['sub']} 연결됨")
+
+@sio.on("disconnect")
+async def disconnect(sid):
+    print(f"Client disconnected: {sid}")
+    active_connections.remove(sid)
+
+# ✅ 2. WebSocket을 통한 실시간 게시글 업데이트
+async def notify_new_post(post):
+    """ 새로운 게시글을 WebSocket을 통해 모든 클라이언트에게 전송 """
+    await sio.emit("newPost", post)
+
+async def notify_updated_post(post):
+    """ 게시글이 수정되었을 때 WebSocket으로 전송 """
+    await sio.emit("updatedPost", post)
+
+async def notify_new_comment(comment):
+    """ 새로운 댓글이 달렸을 때 WebSocket으로 전송 """
+    await sio.emit("newComment", comment)
 
 
 # 게시글 등록 요청 모델
@@ -44,6 +96,10 @@ class CommentRequest(BaseModel):
 # 관리자 답변 요청 모델
 class AnswerRequest(BaseModel):
     answer: str
+
+# ✅ 6. FastAPI 서버에 WebSocket 등록
+def include_socketio(app):
+    app.mount("/ws", socket_app)
 
 # ✅ 1. 전체 게시글 조회 (조회수 실시간 반영)
 @router.get("/")
@@ -100,10 +156,7 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user), backgro
 
 # ✅ 3. 게시글 작성
 @router.post("/")
-def create_post(request: PostCreateRequest, user: dict = Depends(get_authenticated_user)):
-    connection = None 
-    cursor = None      
-
+async def create_post(request: PostCreateRequest, user: dict = Depends(get_authenticated_user)):
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -115,20 +168,21 @@ def create_post(request: PostCreateRequest, user: dict = Depends(get_authenticat
         cursor.execute(query, (request.board_id, user["sub"], request.post_title, request.post_category, request.post_text, datetime.now(), 0))
         connection.commit()
 
+        # 생성된 게시글 가져오기
+        cursor.execute("SELECT * FROM Posts WHERE post_id = LAST_INSERT_ID()")
+        new_post = cursor.fetchone()
+
+        # WebSocket을 통해 새 게시글 알림
+        await notify_new_post(new_post)
+
         return {"message": "게시글이 등록되었습니다."}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {e}")
-
     finally:
-        if cursor is not None:  # cursor가 None이 아닐 때만 닫기
-            cursor.close()
-        if connection is not None:  # connection도 None 체크 후 닫기
-            connection.close()
+        cursor.close()
+        connection.close()
 
 # ✅ 4. 게시글 수정
 @router.put("/{post_id}")
-def update_post(post_id: int, request: PostUpdateRequest, user: dict = Depends(get_authenticated_user)):
+async def update_post(post_id: int, request: PostUpdateRequest, user: dict = Depends(get_authenticated_user)):
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -142,6 +196,13 @@ def update_post(post_id: int, request: PostUpdateRequest, user: dict = Depends(g
         query = "UPDATE Posts SET post_title = %s, post_category = %s, post_text = %s WHERE post_id = %s"
         cursor.execute(query, (request.post_title, request.post_category, request.post_text, post_id))
         connection.commit()
+
+        # 수정된 게시글 가져오기
+        cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
+        updated_post = cursor.fetchone()
+
+        # WebSocket을 통해 게시글 수정 알림
+        await notify_updated_post(updated_post)
 
         return {"message": "게시글이 수정되었습니다."}
     finally:
@@ -207,7 +268,7 @@ def search_posts(
 
 # ✅ 7. 댓글 작성
 @router.post("/{post_id}/comment")
-def add_comment(post_id: int, request: CommentRequest, user: dict = Depends(get_authenticated_user)):
+async def add_comment(post_id: int, request: CommentRequest, user: dict = Depends(get_authenticated_user)):
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -215,6 +276,13 @@ def add_comment(post_id: int, request: CommentRequest, user: dict = Depends(get_
         query = "INSERT INTO comments (post_id, user_email, comment, comment_date) VALUES (%s, %s, %s, NOW())"
         cursor.execute(query, (post_id, user["sub"], request.comment))
         connection.commit()
+
+        # 생성된 댓글 가져오기
+        cursor.execute("SELECT * FROM comments WHERE post_id = %s ORDER BY comment_date DESC LIMIT 1", (post_id,))
+        new_comment = cursor.fetchone()
+
+        # WebSocket을 통해 댓글 추가 알림
+        await notify_new_comment(new_comment)
 
         return {"message": "댓글이 등록되었습니다."}
     finally:
@@ -240,6 +308,7 @@ def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_au
     finally:
         cursor.close()
         connection.close()
+        
         
 # ✅ 파일 업로드 - 게시글 작성 혹은 수정 중에만
 @router.post("/{post_id}/upload")
@@ -373,3 +442,4 @@ def delete_file(file_id: int, user: dict = Depends(verify_token)):
     finally:
         cursor.close()
         connection.close()
+        
