@@ -1,18 +1,11 @@
-# 문의 게시판 
+# 문의 - 사용하지 않음
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import List, Optional
-from app.utils.jwt_utils import verify_token
 import mysql.connector
-
-def get_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="password",
-        database="ongil"
-    )
+from app.core.jwt_utils import verify_token
+from app.database.mysql_connect import get_connection
 
 router = APIRouter()
 
