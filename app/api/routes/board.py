@@ -312,7 +312,7 @@ def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_au
         
 # ✅ 파일 업로드 - 게시글 작성 혹은 수정 중에만
 @router.post("/{post_id}/upload")
-def upload_file(post_id: int, file: UploadFile = File(...), user: dict = Depends(verify_token)):
+def upload_file(post_id: int, file: UploadFile = File(...), user: dict = Depends(get_authenticated_user)):
     try:
         # Validate file size (Example: Max 10MB)
         MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -412,7 +412,7 @@ def download_file(file_id: int):
 
 # ✅ 파일 삭제 - 게시글 작성 혹은 수정 중에만   
 @router.delete("/files/{file_id}")
-def delete_file(file_id: int, user: dict = Depends(verify_token)):
+def delete_file(file_id: int, user: dict = Depends(get_authenticated_user)):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)

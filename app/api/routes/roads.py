@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List
 import redis
 import json
-from app.core.jwt_utils import verify_token
+from app.core.jwt_utils import verify_token, get_authenticated_user
 from app.database.mysql_connect import get_connection
 from app.models.model import load_data, train_model
 
@@ -28,7 +28,7 @@ class UserInput(BaseModel):
     
 # ✅ 지역 지정 
 @router.get("/get_district")
-def get_district(district: str, user: dict = Depends(verify_token)):
+def get_district(district: str, user: dict = Depends(get_authenticated_user)):
     """Check if the district (읍면동) exists in road_info"""
     try:
         connection = get_connection()
@@ -47,7 +47,7 @@ def get_district(district: str, user: dict = Depends(verify_token)):
         
 # ✅ 열선 도로 추천
 @router.post("/recommend")
-def road_recommendations(input_data: UserInput, user: dict = Depends(verify_token)):
+def road_recommendations(input_data: UserInput, user: dict = Depends(get_authenticated_user)):
     """가중치를 적용하여 추천 점수를 계산하고 json형식으로 로그 저장(상위10개)"""
     try:
         connection = get_connection()
@@ -105,7 +105,7 @@ def road_recommendations(input_data: UserInput, user: dict = Depends(verify_toke
 
 # ✅ 추천 로그 확인 
 @router.get("/recommendations/log")
-def get_recommendation_logs(user: dict = Depends(verify_token)):
+def get_recommendation_logs(user: dict = Depends(get_authenticated_user)):
     """Retrieve past recommendations stored in JSON format"""
     try:
         connection = get_connection()
@@ -132,7 +132,7 @@ def get_recommendation_logs(user: dict = Depends(verify_token)):
 
 # ✅ 파일 요청 
 @router.post("/file-request/{log_id}")
-def request_road_file(log_id: int, user: dict = Depends(verify_token)):
+def request_road_file(log_id: int, user: dict = Depends(get_authenticated_user)):
     """파일 요청 api - rec_road_log의 ask_check로 확인"""
     try:
         connection = get_connection()

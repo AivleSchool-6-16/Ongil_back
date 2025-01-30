@@ -5,7 +5,7 @@ from datetime import datetime
 import csv
 import json
 import os
-from app.core.jwt_utils import verify_token
+from app.core.jwt_utils import verify_token, get_authenticated_user
 from app.database.mysql_connect import get_connection
 from app.core.email_utils import send_file_email
 
@@ -19,7 +19,7 @@ class FileRequest(BaseModel):
 
 # ✅ 파일 요청 확인
 @router.get("/file-requests")
-def get_file_requests(token: str = Depends(verify_token)):
+def get_file_requests(token: str = Depends(get_authenticated_user)):
     """파일 요청 확인"""
     if not token.get("admin"):
         raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
@@ -46,7 +46,7 @@ def get_file_requests(token: str = Depends(verify_token)):
 
 # ✅ 파일 승인 
 @router.post("/file-requests/approve/{log_id}")
-def approve_file_request(log_id: int, user: dict = Depends(verify_token)):
+def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_user)):
     """승인 메일, 확인 후 ask_check 0으로 변경"""
     if not user.get("admin"):
         raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
@@ -99,7 +99,7 @@ def approve_file_request(log_id: int, user: dict = Depends(verify_token)):
 
 # ✅ 파일 거부
 @router.post("/file-requests/reject/{log_id}")
-def reject_file_request(log_id: int, user: dict = Depends(verify_token)):
+def reject_file_request(log_id: int, user: dict = Depends(get_authenticated_user)):
     """reject 메일, 확인 후 ask_check 0으로 변경"""
     if not user.get("admin"):
         raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
