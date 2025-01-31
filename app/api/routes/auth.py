@@ -110,6 +110,7 @@ def is_admin(email: str):
 # 1. 이메일 중복 및 형식 확인
 @router.post("/signup/check-email")
 def check_email(request: EmailCheckRequest):
+    """중복 및 형식 확인 """
     if not request.email.endswith("@gmail.com"):
         raise HTTPException(status_code=400, detail="'@gmail.com' 형식만 가능합니다.")
 
@@ -121,6 +122,7 @@ def check_email(request: EmailCheckRequest):
 # 2. 회원가입 인증 이메일 전송
 @router.post("/signup/send-code")
 def send_signup_code(request: EmailCheckRequest):
+    """회원가입 인증 이메일 전송 """
     if find_user_by_email(request.email):
         raise HTTPException(status_code=400, detail="이메일이 이미 사용 중입니다.")
 
@@ -136,7 +138,8 @@ def send_signup_code(request: EmailCheckRequest):
 @router.get("/signup/confirm", response_class=HTMLResponse)
 def confirm_email(token: str = Query(...)):
     """
-    이메일 인증 처리 - 인증 완료 혹은 인증 실패 메세지 
+    이메일 인증 처리 - 인증 완료 혹은 인증 실패 메세지\n
+    토큰을 서버에서 확인 -> 인증 완료 
     """
     try:
         payload = get_authenticated_user(token)
@@ -149,14 +152,7 @@ def confirm_email(token: str = Query(...)):
         redis_client.setex(f"verified:{email}", timedelta(minutes=30), "true")
 
         # 성공 페이지 반환
-        return HTMLResponse(content=f"""
-        <html>
-            <body>
-                <h1>이메일 인증 완료</h1>
-                <p>이메일 인증이 성공적으로 완료되었습니다!</p>
-            </body>
-        </html>
-        """, status_code=200)
+        return {"message": "인증이 완료되었습니다."}
 
     except Exception as e:
         # 실패 페이지 반환
@@ -172,6 +168,11 @@ def confirm_email(token: str = Query(...)):
 # ✅ 4. 회원가입 완료 - 로그인 페이지로 연결 혹은 팝업창만 띄우기
 @router.post("/signup/complete")
 def complete_signup(request: SignUpRequest):
+    """
+    이메일 인증 완료 후 연결되는 api\n
+    인증 완료되면 사용자가 적은 정보를 클라이언트가 requests\n
+    db에 저장되면 회원가입 완료
+    """
     if not redis_client.get(f"verified:{request.email}"):
         raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
 

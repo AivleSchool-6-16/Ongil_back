@@ -41,7 +41,7 @@ def verify_token(token: Optional[str] = Header(None), token_type: str = "access"
         # JWT 토큰 디코딩
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
-        # "admin" 뿐만 아니라 "sub"(사용자 ID/이메일)도 포함하는지 확인
+        # "admin" 뿐만 아니라 "sub"도 포함하는지 확인
         if token_type == "access" and "admin" not in payload and "sub" not in payload:
             raise HTTPException(status_code=401, detail="잘못된 접근 토큰 형식입니다.")
 

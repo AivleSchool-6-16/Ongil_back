@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import traceback
 from typing import Dict
 from app.core.security import verify_password, hash_password
-from app.core.jwt_utils import verify_token
+from app.core.jwt_utils import verify_token, get_authenticated_user
 from app.core.token_blacklist import is_token_blacklisted, add_token_to_blacklist
 from app.database.mysql_connect import get_connection
 
@@ -38,6 +38,7 @@ router = APIRouter()
 
 @router.get("/mypage_load")
 def mypage_load(token: str = Header(...)):
+    """마이페이지 정보 노출 """
     try:
         # Check if token is valid and extract email
         if is_token_blacklisted(token):
@@ -62,6 +63,7 @@ def mypage_load(token: str = Header(...)):
 
 @router.get("/check_password")
 def check_password(password: str, token: str = Header(...)):
+    """비밀번호 확인 """
     try:
         if is_token_blacklisted(token):
             raise HTTPException(status_code=401, detail="Token is invalid or expired.")
@@ -137,11 +139,9 @@ def update_user(update_data: Dict[str, str], token: str = Header(...)):
 
 @router.delete("/delete_user")  # 회원 탈퇴 
 def delete_user(token: str = Header(...)):
+    """회원 탈퇴 """
     try:
-        if is_token_blacklisted(token):
-            raise HTTPException(status_code=401, detail="Token is invalid or expired.")
-
-        payload = verify_token(token)
+        payload = get_authenticated_user(token)
         if not payload:
             raise HTTPException(status_code=401, detail="Invalid or expired token.")
 

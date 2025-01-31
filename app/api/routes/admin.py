@@ -20,7 +20,7 @@ class FileRequest(BaseModel):
 # ✅ 파일 요청 확인
 @router.get("/file-requests")
 def get_file_requests(token: str = Depends(get_authenticated_user)):
-    """파일 요청 확인"""
+    """파일 요청 전체 확인"""
     if not token.get("admin"):
         raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
 
@@ -47,7 +47,9 @@ def get_file_requests(token: str = Depends(get_authenticated_user)):
 # ✅ 파일 승인 
 @router.post("/file-requests/approve/{log_id}")
 def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_user)):
-    """승인 메일, 확인 후 ask_check 0으로 변경"""
+    """승인 메일, 확인 후 ask_check 0으로 변경\n
+    (혹은 로그 delete하기)
+    """
     if not user.get("admin"):
         raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
 
@@ -122,7 +124,7 @@ def reject_file_request(log_id: int, user: dict = Depends(get_authenticated_user
         email_body = f"{user_email}님,\n\n요청하신 도로 추천 파일이 거부되었습니다. 추가 문의는 관리자에게 연락하세요."
         send_file_email(to_email=user_email, subject=email_subject, body=email_body)
 
-        # Reset `ask_check` to 0 instead of deleting - 혹은 log delete
+        # Reset `ask_check` to 0 instead of deleting
         update_query = "UPDATE rec_road_log SET ask_check = 0 WHERE log_id = %s"
         cursor.execute(update_query, (log_id,))
         connection.commit()
