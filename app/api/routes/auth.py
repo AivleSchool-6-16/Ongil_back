@@ -7,7 +7,7 @@ from mysql.connector import Error
 from app.database.mysql_connect import get_connection
 from app.core.security import hash_password, verify_password
 from app.core.email_utils import generate_verification_code, send_verification_email, send_signup_email
-from app.core.jwt_utils import create_access_token, verify_token, create_refresh_token
+from app.core.jwt_utils import create_access_token, verify_token, create_refresh_token, get_authenticated_user
 from app.core.token_blacklist import add_token_to_blacklist, is_token_blacklisted
 
 router = APIRouter()
@@ -136,10 +136,10 @@ def send_signup_code(request: EmailCheckRequest):
 @router.get("/signup/confirm", response_class=HTMLResponse)
 def confirm_email(token: str = Query(...)):
     """
-    이메일 인증 처리 - 성공하면 로그인으로 이동, 실패하면 팝업창 뜨도록 
+    이메일 인증 처리 - 인증 완료 혹은 인증 실패 메세지 
     """
     try:
-        payload = verify_token(token)
+        payload = get_authenticated_user(token)
         email = payload.get("sub")
 
         if not email:
@@ -148,7 +148,7 @@ def confirm_email(token: str = Query(...)):
         # Redis에서 인증 상태 업데이트
         redis_client.setex(f"verified:{email}", timedelta(minutes=30), "true")
 
-        # 성공 페이지 반환 - 로그인 페이지로 이동하도록 
+        # 성공 페이지 반환
         return HTMLResponse(content=f"""
         <html>
             <body>
@@ -169,7 +169,7 @@ def confirm_email(token: str = Query(...)):
         </html>
         """, status_code=400)
 
-# ✅ 4. 회원가입 완료
+# ✅ 4. 회원가입 완료 - 로그인 페이지로 연결 혹은 팝업창만 띄우기
 @router.post("/signup/complete")
 def complete_signup(request: SignUpRequest):
     if not redis_client.get(f"verified:{request.email}"):

@@ -47,7 +47,7 @@ def send_signup_email(email: str, token: str):
         <body>
             <p>안녕하세요,</p>
             <p>회원가입을 완료하려면 아래 버튼을 클릭하여 이메일 인증을 완료하세요:</p>
-            <a href="http://127.0.0.1:8000/signup/confirm?token={token}" 
+            <a href="http://127.0.0.1:8000/auth/signup/confirm?token={token}" 
                style="display:inline-block;padding:10px 20px;color:white;background-color:blue;text-decoration:none;border-radius:5px;">
                이메일 인증
             </a>
