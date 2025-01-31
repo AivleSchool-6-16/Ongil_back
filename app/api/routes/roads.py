@@ -7,7 +7,6 @@ import redis
 import json
 from app.core.jwt_utils import verify_token, get_authenticated_user
 from app.database.mysql_connect import get_connection
-from app.models.model import load_data, train_model
 
 
 router = APIRouter()
