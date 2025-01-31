@@ -3,9 +3,10 @@ from fastapi import APIRouter, HTTPException, Header, status
 from pydantic import EmailStr, field_validator
 from datetime import datetime, timezone
 import traceback
+import mysql
 from typing import Dict
 from app.core.security import verify_password, hash_password
-from app.core.jwt_utils import verify_token, get_authenticated_user
+from app.core.jwt_utils import verify_token
 from app.core.token_blacklist import is_token_blacklisted, add_token_to_blacklist
 from app.database.mysql_connect import get_connection
 
@@ -137,11 +138,14 @@ def update_user(update_data: Dict[str, str], token: str = Header(...)):
             detail="Failed to update user data."
         )
 
-@router.delete("/delete_user")  # 회원 탈퇴 
+@router.delete("/delete_user")
 def delete_user(token: str = Header(...)):
-    """회원 탈퇴 """
+    """회원 탈퇴 (연관된 모든 데이터 삭제 후 user_data 삭제)"""
     try:
-        payload = get_authenticated_user(token)
+        if is_token_blacklisted(token):
+            raise HTTPException(status_code=401, detail="Token is invalid or expired.")
+
+        payload = verify_token(token)
         if not payload:
             raise HTTPException(status_code=401, detail="Invalid or expired token.")
 
@@ -149,23 +153,31 @@ def delete_user(token: str = Header(...)):
         if not user_email:
             raise HTTPException(status_code=400, detail="Invalid token payload.")
 
-        # Delete user from user_data
+        # 1. 모든 테이블에서 user_email 관련 데이터 삭제
+        related_tables = ["Posts", "answer", "comments", "file_metadata", "log", "permissions", "rec_road_log"]
+        
+        for table in related_tables:
+            query_delete = f"DELETE FROM {table} WHERE user_email = %s"
+            execute_query(query_delete, (user_email,))
+
+        # 2. user_data 테이블에서 사용자 삭제
         query_delete_user = "DELETE FROM user_data WHERE user_email = %s"
         execute_query(query_delete_user, (user_email,))
 
-        # Add token to blacklist
+        # 3. 토큰을 블랙리스트에 추가하여 로그아웃 처리
         expiration_time = payload.get("exp")
         current_time = datetime.now(timezone.utc).timestamp()
         remaining_time = max(int(expiration_time - current_time), 0)
         add_token_to_blacklist(token, remaining_time)
 
-        return {"message": "탈퇴가 완료되었습니다."}
+        return {"message": "회원 탈퇴가 완료되었습니다."}
 
-    except HTTPException as he:
-        raise he
-    except Exception:
+    except mysql.connector.IntegrityError as e:
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {str(e)}")
+
+    except Exception as e:
         traceback.print_exc()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="회원탈퇴에 실패하였습니다."
+            status_code=500,
+            detail=f"회원 탈퇴에 실패하였습니다. Error: {str(e)}"
         )

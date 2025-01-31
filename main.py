@@ -16,43 +16,60 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+
 # ✅ FastAPI Dependency: 데이터베이스 세션 제공
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+  db = SessionLocal()
+  try:
+    yield db
+  finally:
+    db.close()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 App is starting... Initializing scheduler")
-    # 백그라운드 작업 스케줄러 설정
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(sync_redis_to_mysql, "interval", minutes=10)  # 10분마다 실행
-    scheduler.start()
+  print("🚀 App is starting... Initializing scheduler")
+  # 백그라운드 작업 스케줄러 설정
+  scheduler = BackgroundScheduler()
+  scheduler.add_job(sync_redis_to_mysql, "interval", minutes=10)  # 10분마다 실행
+  scheduler.start()
 
-    # 스케줄러 상태 저장 (GC 방지)
-    app.state.scheduler = scheduler
+  # 스케줄러 상태 저장 (GC 방지)
+  app.state.scheduler = scheduler
 
-    yield  # 애플리케이션 실행
+  yield  # 애플리케이션 실행
 
-    print("🛑 Shutting down scheduler...")
-    scheduler.shutdown()
+  print("🛑 Shutting down scheduler...")
+  scheduler.shutdown()
+
 
 # ✅ 웹 선언
 app = FastAPI(lifespan=lifespan)
 
+
 # ✅ Middleware
 @app.middleware("http")
 async def check_token_blacklist(request: Request, call_next):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if token:
-        if is_token_blacklisted(token):
-            raise HTTPException(status_code=401, detail="Token is blacklisted.")
-        if not verify_token(token):
-            raise HTTPException(status_code=401, detail="Invalid or expired token.")
+  # 토큰 검증을 건너뛰어야 하는 엔드포인트 목록 (필요에 따라 추가)
+  exempt_paths = ["/auth/login", "/auth/signup"]
+
+  # 요청 경로가 exempt_paths에 포함되어 있다면, 토큰 검증 건너뛰기
+  if request.url.path in exempt_paths:
     return await call_next(request)
+
+  # 토큰이 존재하는 경우에만 검증 진행
+  token = request.headers.get("Authorization", "").replace("Bearer ", "")
+  if token:
+    if is_token_blacklisted(token):
+      raise HTTPException(status_code=401, detail="Token is blacklisted.")
+    if not verify_token(token):
+      raise HTTPException(status_code=401, detail="Invalid or expired token.")
+  else:
+    # 토큰이 필요한 엔드포인트에서 토큰이 제공되지 않은 경우
+    raise HTTPException(status_code=401, detail="No token provided.")
+
+  return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,9 +88,11 @@ app.include_router(roads.router, prefix="/roads", tags=["Roads"])
 
 # ✅ WebSocket 서버 마운트 (board.py에서 설정한 socket_app과 연결)
 from app.api.routes.board import socket_app
+
 app.mount("/ws", socket_app)
-print("WebSocket 서버가 마운트되었습니다: /ws") 
+print("WebSocket 서버가 마운트되었습니다: /ws")
+
 
 @app.get("/")
 def root():
-    return {"message": "개발 중.."}
+  return {"message": "개발 중.."}
