@@ -1,13 +1,14 @@
 from fastapi import APIRouter, HTTPException, Header, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
 import redis
+import json
 from mysql.connector import Error
 from app.database.mysql_connect import get_connection
 from app.core.security import hash_password, verify_password
 from app.core.email_utils import generate_verification_code, send_verification_email, send_signup_email
-from app.core.jwt_utils import create_access_token, verify_token, create_refresh_token, get_authenticated_user
+from app.core.jwt_utils import create_access_token, verify_token, create_refresh_token
 from app.core.token_blacklist import add_token_to_blacklist, is_token_blacklisted
 
 router = APIRouter()
@@ -119,15 +120,30 @@ def check_email(request: EmailCheckRequest):
 
     return {"message": "사용 가능한 이메일입니다."}
 
-# 2. 회원가입 인증 이메일 전송
-@router.post("/signup/send-code")
-def send_signup_code(request: EmailCheckRequest):
-    """회원가입 인증 이메일 전송 """
+# 2. 비밀번호 검증 및 회원가입 인증 이메일 전송
+@router.post("/signup/send-email")
+def send_signup_email(request: SignUpRequest):
+    """
+    비밀번호 검증 및 회원가입 인증 이메일 전송
+    - 비밀번호 검증 실패 시 오류 반환\n
+    - 이메일 중복 확인 후 인증 이메일 전송\n
+    - Redis에 사용자 정보 저장 (10분 유지)
+    """
+    # 이메일 중복 확인
     if find_user_by_email(request.email):
         raise HTTPException(status_code=400, detail="이메일이 이미 사용 중입니다.")
+    
+    hashed_password = hash_password(request.password)
 
     token = create_access_token(data={"sub": request.email}, expires_delta=timedelta(minutes=10))
-    redis_client.setex(f"signup_token:{request.email}", timedelta(minutes=10), token)
+    user_data = {
+        "email": request.email,
+        "password": hashed_password,  # 해싱된 비밀번호 저장
+        "name": request.name,
+        "jurisdiction": request.jurisdiction,
+        "department": request.department
+    }
+    redis_client.setex(f"signup_data:{request.email}", timedelta(minutes=10), json.dumps(user_data))
 
     if not send_signup_email(request.email, token):
         raise HTTPException(status_code=500, detail="인증 이메일 발송에 실패했습니다.")
@@ -135,66 +151,120 @@ def send_signup_code(request: EmailCheckRequest):
     return {"message": "회원가입 인증 이메일이 발송되었습니다. 10분 이내에 인증을 완료해주세요."}
 
 # 3. 이메일 인증 확인
-@router.get("/signup/confirm", response_class=HTMLResponse)
+@router.get("/signup/confirm")
 def confirm_email(token: str = Query(...)):
     """
-    이메일 인증 처리 - 인증 완료 혹은 인증 실패 메세지\n
-    토큰을 서버에서 확인 -> 인증 완료 
+    이메일 인증 완료 시 해싱된 비밀번호 포함 사용자 정보를 DB에 저장 후 로그인 페이지로 리디렉트\n
     """
     try:
-        payload = get_authenticated_user(token)
+        payload = verify_token(token)
         email = payload.get("sub")
 
         if not email:
-            raise HTTPException(status_code=400, detail="유효하지 않은 토큰입니다.")
+            return RedirectResponse(url="/signup/error?error_type=invalid_token")
 
-        # Redis에서 인증 상태 업데이트
-        redis_client.setex(f"verified:{email}", timedelta(minutes=30), "true")
+        # Check if user already exists
+        if find_user_by_email(email):
+            return RedirectResponse(url="/login")
 
-        # 성공 페이지 반환
-        return {"message": "인증이 완료되었습니다."}
+        # Retrieve user data from Redis
+        user_data_json = redis_client.get(f"signup_data:{email}")
+        if not user_data_json:
+            return RedirectResponse(url="/signup/error?error_type=missing_info")
 
-    except Exception as e:
-        # 실패 페이지 반환
-        return HTMLResponse(content=f"""
-        <html>
-            <body>
-                <h1>이메일 인증 실패</h1>
-                <p>인증 토큰이 유효하지 않거나 만료되었습니다.</p>
-            </body>
-        </html>
-        """, status_code=400)
+        user_data = json.loads(user_data_json)
 
-# ✅ 4. 회원가입 완료 - 로그인 페이지로 연결 혹은 팝업창만 띄우기
-@router.post("/signup/complete")
-def complete_signup(request: SignUpRequest):
+        # Save user data to MySQL
+        try:
+            connection = get_connection()
+            cursor = connection.cursor()
+            query = """
+            INSERT INTO user_data (user_email, user_ps, user_name, jurisdiction, user_dept)
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            values = (
+                user_data["email"],
+                user_data["password"],  # 이미 암호화된 상태
+                user_data["name"],
+                user_data["jurisdiction"],
+                user_data["department"]
+            )
+            cursor.execute(query, values)
+            connection.commit()
+        finally:
+            if connection.is_connected():
+                cursor.close()
+                connection.close()
+
+        # Remove user data from Redis
+        redis_client.delete(f"signup_data:{email}")
+
+        # Redirect to login page upon success
+        return RedirectResponse(url="/login")
+
+    except Exception:
+        return RedirectResponse(url="/signup/error?error_type=unknown")
+    
+@router.get("/signup/error", response_class=HTMLResponse)
+def signup_error(error_type: str = Query("unknown")):
     """
-    이메일 인증 완료 후 연결되는 api\n
-    인증 완료되면 사용자가 적은 정보를 클라이언트가 requests\n
-    db에 저장되면 회원가입 완료
+    회원가입 중 오류가 발생했을 때 오류 메시지를 표시하는 페이지
     """
-    if not redis_client.get(f"verified:{request.email}"):
-        raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
+    error_messages = {
+        "invalid_token": "인증 토큰이 유효하지 않거나 만료되었습니다.",
+        "missing_info": "회원가입 정보가 누락되었습니다. 다시 진행해주세요.",
+        "already_registered": "이미 회원가입된 이메일입니다. 로그인하세요.",
+        "unknown": "알 수 없는 오류가 발생했습니다. 다시 시도해주세요."
+    }
 
-    if find_user_by_email(request.email):
-        raise HTTPException(status_code=400, detail="이메일이 이미 사용 중입니다.")
+    error_message = error_messages.get(error_type, error_messages["unknown"])
 
-    hashed_password = hash_password(request.password)
-    try:
-        connection = get_connection()
-        cursor = connection.cursor()
-        query = (
-            "INSERT INTO user_data (user_email, user_ps, user_name, jurisdiction, user_dept) "
-            "VALUES (%s, %s, %s, %s, %s)"
-        )
-        cursor.execute(query, (request.email, hashed_password, request.name, request.jurisdiction, request.department))
-        connection.commit()
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+    return HTMLResponse(content=f"""
+    <html>
+        <head>
+            <script>
+                window.onload = function() {{
+                    alert("{error_message}");
+                    window.location.href = "/signup";
+                }};
+            </script>
+        </head>
+        <body>
+        </body>
+    </html>
+    """, status_code=400)
 
-    return {"message": "회원가입이 완료되었습니다."}
+# 4. 회원가입 완료 - 로그인 페이지로 연결 혹은 팝업창만 띄우기
+# @router.post("/signup/complete")
+# def complete_signup(request: SignUpRequest):
+#     """
+#     이메일 인증 완료 후 연결되는 api\n
+#     인증 완료되면 사용자가 적은 정보를 클라이언트가 requests\n
+#     db에 저장되면 회원가입 완료
+#     """
+#     if not redis_client.get(f"verified:{request.email}"):
+#         raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
+
+#     if find_user_by_email(request.email):
+#         raise HTTPException(status_code=400, detail="이메일이 이미 사용 중입니다.")
+
+#     hashed_password = hash_password(request.password)
+#     try:
+#         connection = get_connection()
+#         cursor = connection.cursor()
+#         query = (
+#             "INSERT INTO user_data (user_email, user_ps, user_name, jurisdiction, user_dept) "
+#             "VALUES (%s, %s, %s, %s, %s)"
+#         )
+#         cursor.execute(query, (request.email, hashed_password, request.name, request.jurisdiction, request.department))
+#         connection.commit()
+#     finally:
+#         if connection.is_connected():
+#             cursor.close()
+#             connection.close()
+
+#     return {"message": "회원가입이 완료되었습니다."}
+
 
 # ✅ 로그인 API
 @router.post("/login")
