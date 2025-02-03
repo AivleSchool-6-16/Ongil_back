@@ -193,21 +193,43 @@ def confirm_email(token: str = Query(...)):
     payload = verify_token(token)
     email = payload.get("sub")
 
-    if not email:
-      return RedirectResponse(url="/signup/error?error_type=invalid_token")
+        if not email:
+            raise HTTPException(status_code=400, detail="유효하지 않은 토큰입니다.")
 
-    # Check if user already exists
-    if find_user_by_email(email):
-      return RedirectResponse(url="/login")
+        # Redis에서 인증 상태 업데이트
+        redis_client.setex(f"verified:{email}", timedelta(minutes=30), "true")
 
-    # Retrieve user data from Redis
-    user_data_json = redis_client.get(f"signup_data:{email}")
-    if not user_data_json:
-      return RedirectResponse(url="/signup/error?error_type=missing_info")
+        # 성공 페이지 반환 - 로그인 페이지로 이동하도록 
+        return HTMLResponse(content=f"""
+        <html>
+            <body>
+                <h1>이메일 인증 완료</h1>
+                <p>이메일 인증이 성공적으로 완료되었습니다!</p>
+            </body>
+        </html>
+        """, status_code=200)
 
-    user_data = json.loads(user_data_json)
+    except Exception as e:
+        # 실패 페이지 반환
+        return HTMLResponse(content=f"""
+        <html>
+            <body>
+                <h1>이메일 인증 실패</h1>
+                <p>인증 토큰이 유효하지 않거나 만료되었습니다.</p>
+            </body>
+        </html>
+        """, status_code=400)
 
-    # Save user data to MySQL
+# ✅ 4. 회원가입 완료
+@router.post("/signup/complete")
+def complete_signup(request: SignUpRequest):
+    if not redis_client.get(f"verified:{request.email}"):
+        raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
+
+    if find_user_by_email(request.email):
+        raise HTTPException(status_code=400, detail="이메일이 이미 사용 중입니다.")
+
+    hashed_password = hash_password(request.password)
     try:
       connection = get_connection()
       cursor = connection.cursor()
