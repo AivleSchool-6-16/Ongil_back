@@ -9,6 +9,8 @@ from app.api.routes import admin, auth, board, mypage, roads
 from app.core.token_blacklist import is_token_blacklisted
 from app.core.jwt_utils import verify_token
 from app.services.sync_views import sync_redis_to_mysql
+from fastapi.exceptions import RequestValidationError
+from starlette.responses import JSONResponse
 
 # ✅ MySQL 연결 설정
 DATABASE_URL = "mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
@@ -46,30 +48,26 @@ async def lifespan(app: FastAPI):
 # ✅ 웹 선언
 app = FastAPI(lifespan=lifespan)
 
+# 입력형식 오류 handler
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=400,  
+        content={"detail": "입력 형식이 올바르지 않습니다."}
+    )
 
 # ✅ Middleware
 @app.middleware("http")
 async def check_token_blacklist(request: Request, call_next):
-  # 토큰 검증을 건너뛰어야 하는 엔드포인트 목록 (필요에 따라 추가)
-  exempt_paths = ["/auth/login", "/auth/signup"]
+  
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if token:
+        if is_token_blacklisted(token):
+            raise HTTPException(status_code=401, detail="토큰이 블랙리스트에 등록되었습니다.")
+        if not verify_token(token):
+            raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다.")
 
-  # 요청 경로가 exempt_paths에 포함되어 있다면, 토큰 검증 건너뛰기
-  if request.url.path in exempt_paths:
     return await call_next(request)
-
-  # 토큰이 존재하는 경우에만 검증 진행
-  token = request.headers.get("Authorization", "").replace("Bearer ", "")
-  if token:
-    if is_token_blacklisted(token):
-      raise HTTPException(status_code=401, detail="Token is blacklisted.")
-    if not verify_token(token):
-      raise HTTPException(status_code=401, detail="Invalid or expired token.")
-  else:
-    # 토큰이 필요한 엔드포인트에서 토큰이 제공되지 않은 경우
-    raise HTTPException(status_code=401, detail="No token provided.")
-
-  return await call_next(request)
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,6 +76,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ✅ 라우터 추가
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -88,10 +87,7 @@ app.include_router(roads.router, prefix="/roads", tags=["Roads"])
 
 # ✅ WebSocket 서버 마운트 (board.py에서 설정한 socket_app과 연결)
 from app.api.routes.board import socket_app
-
 app.mount("/ws", socket_app)
-print("WebSocket 서버가 마운트되었습니다: /ws")
-
 
 @app.get("/")
 def root():
