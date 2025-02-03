@@ -45,3 +45,4 @@ tzlocal==5.2
 uvicorn==0.34.0
 wheel==0.44.0
 wrapt==1.17.2
+socketio

@@ -144,6 +144,7 @@ def include_socketio(app):
 # ✅ 1. 전체 게시글 조회 (조회수 실시간 반영)
 @router.get("/")
 def get_all_posts(user: dict = Depends(get_authenticated_user)):
+    """전체 조회 - 게시글 id, 비밀글 여부, 작성자, 제목, 카테고리, 작성시간, 조회수 """
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
@@ -165,6 +166,7 @@ def get_all_posts(user: dict = Depends(get_authenticated_user)):
 # ✅ 2. 특정 게시글 조회 (조회수 증가 & 실시간 반영)
 @router.get("/{post_id}")
 def get_post(post_id: int, user: dict = Depends(get_authenticated_user), background_tasks: BackgroundTasks = None):
+    """특정 게시글 상세 조회 - 들어올 때마다 조회수 증가 """
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
@@ -197,6 +199,7 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user), backgro
 # ✅ 3. 게시글 작성
 @router.post("/")
 async def create_post(request: PostCreateRequest, user: dict = Depends(get_authenticated_user)):
+    """게시글 작성 """
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -223,6 +226,7 @@ async def create_post(request: PostCreateRequest, user: dict = Depends(get_authe
 # ✅ 4. 게시글 수정
 @router.put("/{post_id}")
 async def update_post(post_id: int, request: PostUpdateRequest, user: dict = Depends(get_authenticated_user)):
+    """게시글 수정 - 본인 혹은 관리자만 """
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -252,6 +256,7 @@ async def update_post(post_id: int, request: PostUpdateRequest, user: dict = Dep
 # ✅ 5. 게시글 삭제
 @router.delete("/{post_id}")
 def delete_post(post_id: int, user: dict = Depends(get_authenticated_user)):
+    """게시글 삭제 - 본인 혹은 관리자만 """
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -272,11 +277,8 @@ def delete_post(post_id: int, user: dict = Depends(get_authenticated_user)):
 
 # ✅ 6. 게시글 검색
 @router.get("/search/")
-def search_posts(
-    text: Optional[str] = Query(None),
-    author: Optional[str] = Query(None),
-    user: dict = Depends(get_authenticated_user)
-):
+def search_posts(text: Optional[str] = Query(None),author: Optional[str] = Query(None),user: dict = Depends(get_authenticated_user)):
+    """게시글 검색 """
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
@@ -309,6 +311,7 @@ def search_posts(
 # ✅ 7. 댓글 작성
 @router.post("/{post_id}/comment")
 async def add_comment(post_id: int, request: CommentRequest, user: dict = Depends(get_authenticated_user)):
+    """일반 댓글 작성 """
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -333,6 +336,7 @@ async def add_comment(post_id: int, request: CommentRequest, user: dict = Depend
 # ✅ 8. 관리자 답변 작성
 @router.post("/{post_id}/answer")
 def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_authenticated_user)):
+    """관리자 답변 """
     if not user.get("admin"):
         raise HTTPException(status_code=403, detail="관리자만 답변을 작성할 수 있습니다.")
 
@@ -420,6 +424,7 @@ async def upload_file(post_id: int, file: UploadFile = File(...), user: dict = D
 # ✅ 게시글의 파일 목록 가져오기  
 @router.get("/{post_id}/files")
 def get_post_files(post_id: int):
+    """파일 목록 - 확인용 api """
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
@@ -484,7 +489,8 @@ def download_file(file_id: int):
 
 # ✅ 파일 삭제 - 게시글 작성 혹은 수정 중에만   
 @router.delete("/files/{file_id}")
-def delete_file(file_id: int, user: dict = Depends(verify_token)):
+def delete_file(file_id: int, user: dict = Depends(get_authenticated_user)):
+    """파일 삭제 - 게시글 작성 혹은 수정 중에만 연결 가능 """
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
