@@ -1,14 +1,13 @@
 # mypage - 정보 조회, 수정, 탈퇴 
-from fastapi import APIRouter, HTTPException, Header, status
+from fastapi import APIRouter, HTTPException, Header, status, Depends
 from pydantic import EmailStr, field_validator
 from datetime import datetime, timezone
 import traceback
 import mysql
 from typing import Dict
 from app.core.security import verify_password, hash_password
-from app.core.jwt_utils import verify_token
-from app.core.token_blacklist import is_token_blacklisted, \
-  add_token_to_blacklist
+from app.core.jwt_utils import verify_token, get_authenticated_user
+from app.core.token_blacklist import is_token_blacklisted, add_token_to_blacklist
 from app.database.mysql_connect import get_connection
 
 
@@ -37,9 +36,7 @@ def execute_query(query: str, params: tuple = ()):
     if conn:
       conn.close()
 
-
 router = APIRouter()
-
 
 @router.get("/mypage_load")
 def mypage_load(token: str = Header(...)):
@@ -48,7 +45,7 @@ def mypage_load(token: str = Header(...)):
     # Check if token is valid and extract email
     if is_token_blacklisted(token):
       raise HTTPException(status_code=401,
-                          detail="Token is invalid or expired.")
+                          detail="토큰이 만료되었습니다.")
 
     user_email = verify_token(token).get("sub")
 
@@ -57,7 +54,7 @@ def mypage_load(token: str = Header(...)):
     user_info = execute_query(query, (user_email,))
 
     if not user_info:
-      raise HTTPException(status_code=404, detail="User not found.")
+      raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
     return {"user_info": user_info}
   except Exception:
@@ -74,7 +71,7 @@ def check_password(password: str, token: str = Header(...)):
   try:
     if is_token_blacklisted(token):
       raise HTTPException(status_code=401,
-                          detail="Token is invalid or expired.")
+                          detail="토큰이 만료되었습니다.")
 
     user_email = verify_token(token).get("sub")
 
@@ -83,30 +80,30 @@ def check_password(password: str, token: str = Header(...)):
     user_record = execute_query(query_user, (user_email,))
 
     if not user_record:
-      raise HTTPException(status_code=404, detail="User not found.")
+      raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
     db_hashed_ps = user_record[0]['user_ps']
 
     # Verify password using bcrypt
     if not verify_password(password, db_hashed_ps):
-      raise HTTPException(status_code=400, detail="Incorrect password.")
+      raise HTTPException(status_code=400, detail="비밀번호가 다릅니다.")
 
     return {"message": "비밀번호가 확인되었습니다."}
   except Exception:
     traceback.print_exc()
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Failed to verify password."
+        detail="비밀번호 인증에 실해하였습니다."
     )
 
-
+# 사용자 정보 수정 
 @router.put("/update_user")
 def update_user(update_data: Dict[str, str], token: str = Header(...)):
   """user_ps, user_dept, jurisdiction만 가능"""
   try:
     if is_token_blacklisted(token):
       raise HTTPException(status_code=401,
-                          detail="Token is invalid or expired.")
+                          detail="토큰이 만료되었습니다.")
 
     user_email = verify_token(token).get("sub")
 
@@ -136,7 +133,7 @@ def update_user(update_data: Dict[str, str], token: str = Header(...)):
     execute_query(query, tuple(values))
 
     return {
-      "message": "User data updated successfully.",
+      "message": "성공적으로 업데이트되었습니다.",
       "updated_fields": list(filtered_data.keys())
     }
   except HTTPException as he:
@@ -145,29 +142,24 @@ def update_user(update_data: Dict[str, str], token: str = Header(...)):
     traceback.print_exc()
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Failed to update user data."
+        detail="업데이트에 실패하였습니다."
     )
 
-
+# 회원탈퇴 
 @router.delete("/delete_user")
 def delete_user(token: str = Header(...)):
   """회원 탈퇴 (연관된 모든 데이터 삭제 후 user_data 삭제)"""
   try:
-    if is_token_blacklisted(token):
-      raise HTTPException(status_code=401,
-                          detail="Token is invalid or expired.")
-
     payload = verify_token(token)
     if not payload:
-      raise HTTPException(status_code=401, detail="Invalid or expired token.")
+        raise HTTPException(status_code=401, detail="만료된 토큰입니다.")
 
-    user_email = payload.get("sub")
+    user_email = payload["sub"]
     if not user_email:
       raise HTTPException(status_code=400, detail="Invalid token payload.")
 
     # 1. 모든 테이블에서 user_email 관련 데이터 삭제
-    related_tables = ["Posts", "answer", "comments", "file_metadata", "log",
-                      "permissions", "rec_road_log"]
+    related_tables = ["Posts", "answer", "comments", "file_metadata","permissions", "rec_road_log"]
 
     for table in related_tables:
       query_delete = f"DELETE FROM {table} WHERE user_email = %s"
@@ -186,8 +178,7 @@ def delete_user(token: str = Header(...)):
     return {"message": "회원 탈퇴가 완료되었습니다."}
 
   except mysql.connector.IntegrityError as e:
-    raise HTTPException(status_code=400,
-                        detail=f"Database integrity error: {str(e)}")
+    raise HTTPException(status_code=400,detail=f"Database integrity error: {str(e)}")
 
   except Exception as e:
     traceback.print_exc()

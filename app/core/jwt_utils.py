@@ -52,8 +52,6 @@ def verify_token(token: str, token_type: str = "access"):
 
 def get_authenticated_user(token: Optional[str] = Header(None)):
     """토큰을 검증하고 인증된 사용자 정보를 반환하는 함수"""
-    if not token:
-        raise HTTPException(status_code=401, detail="인증 토큰이 없습니다.")
 
     if is_token_blacklisted(token):  # 블랙리스트 체크
         raise HTTPException(status_code=401, detail="이 토큰은 블랙리스트에 등록되었습니다.")
