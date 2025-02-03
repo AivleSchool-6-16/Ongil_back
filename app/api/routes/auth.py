@@ -177,7 +177,7 @@ def complete_signup(request: SignUpRequest):
 
     if find_user_by_email(request.email):
         raise HTTPException(status_code=400, detail="이메일이 이미 사용 중입니다.")
-
+    
     hashed_password = hash_password(request.password)
     try:
         connection = get_connection()
