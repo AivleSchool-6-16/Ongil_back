@@ -13,18 +13,17 @@ from app.core.token_blacklist import add_token_to_blacklist, is_token_blackliste
 
 router = APIRouter()
 
-# redis 연결
+# Redis 연결
 try:
-  redis_client = redis.StrictRedis(host="localhost", port=6379, db=0)
+    redis_client = redis.StrictRedis(host="localhost", port=6379, db=0)
 except Exception as e:
-  print(f"Redis connection failed: {e}")
-  redis_client = None
+    print(f"Redis connection failed: {e}")
+    redis_client = None
 
-# 인증번호 임시 저장 : 보안성(?)
+# 인증번호 임시 저장
 verification_codes = {}
 
-
-# requests 모델 정의
+# 요청 모델 정의
 class SignUpRequest(BaseModel):
     email: EmailStr
     password: str
@@ -37,45 +36,31 @@ class SignUpRequest(BaseModel):
     def validate_password(cls, value):
         """비밀번호 유효성 검증 - 8자리 이상, 대소문자 포함, 특수문자 포함"""
         if len(value) < 8:
-            raise HTTPException(
-                status_code=400,
-                detail="비밀번호는 최소 8자리 이상이어야 합니다."
-            )
+            raise HTTPException(status_code=400, detail="비밀번호는 최소 8자리 이상이어야 합니다.")
         if not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c in "!@#$%^&*()" for c in value):
-            raise HTTPException(
-                status_code=400,
-                detail="비밀번호는 대소문자 및 !@#$%^&*() 중 하나 이상 포함해야 합니다."
-            )
+            raise HTTPException(status_code=400, detail="비밀번호는 대소문자 및 !@#$%^&*() 중 하나 이상 포함해야 합니다.")
         return value
 
     @field_validator("confirm_password")
     def passwords_match(cls, value, info):
         """비밀번호 확인 - 입력한 두 비밀번호가 일치하는지 검증"""
         if "password" in info.data and value != info.data["password"]:
-            raise HTTPException(
-                status_code=400,
-                detail="입력한 비밀번호가 일치하지 않습니다."
-            )
+            raise HTTPException(status_code=400, detail="입력한 비밀번호가 일치하지 않습니다.")
         return value
 
-
 class LoginRequest(BaseModel):
-  email: EmailStr
-  password: str
-
+    email: EmailStr
+    password: str
 
 class LogoutRequest(BaseModel):
-  token: str
-
+    token: str
 
 class EmailCheckRequest(BaseModel):
-  email: EmailStr
-
+    email: EmailStr
 
 class VerifyCodeRequest(BaseModel):
-  email: EmailStr
-  code: str
-
+    email: EmailStr
+    code: str
 
 class ResetPasswordRequest(BaseModel):
     reset_token: str
@@ -86,60 +71,49 @@ class ResetPasswordRequest(BaseModel):
     def validate_password(cls, value):
         """비밀번호 유효성 검증 - 8자리 이상, 대소문자 포함, 특수문자 포함"""
         if len(value) < 8:
-            raise HTTPException(
-                status_code=400,
-                detail="새 비밀번호는 최소 8자리 이상이어야 합니다."
-            )
+            raise HTTPException(status_code=400, detail="새 비밀번호는 최소 8자리 이상이어야 합니다.")
         if not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c in "!@#$%^&*()" for c in value):
-            raise HTTPException(
-                status_code=400,
-                detail="새 비밀번호는 대소문자 및 !@#$%^&*() 중 하나 이상 포함해야 합니다."
-            )
+            raise HTTPException(status_code=400, detail="새 비밀번호는 대소문자 및 !@#$%^&*() 중 하나 이상 포함해야 합니다.")
         return value
 
     @field_validator("confirm_password")
     def passwords_match(cls, value, info):
         """비밀번호 확인 - 입력한 두 비밀번호가 일치하는지 검증"""
         if "new_password" in info.data and value != info.data["new_password"]:
-            raise HTTPException(
-                status_code=400,
-                detail="입력한 새 비밀번호가 일치하지 않습니다."
-            )
+            raise HTTPException(status_code=400, detail="입력한 새 비밀번호가 일치하지 않습니다.")
         return value
 
 # 사용자 확인
 def find_user_by_email(email: str):
-  try:
-    connection = get_connection()
-    cursor = connection.cursor(dictionary=True)
-    query = "SELECT * FROM user_data WHERE user_email = %s"
-    cursor.execute(query, (email,))
-    user = cursor.fetchone()
-    return user
-  except Error as e:
-    print(f"Database error: {e}")
-    raise HTTPException(status_code=500, detail="Database connection failed.")
-  finally:
-    if 'cursor' in locals() and cursor:
-      cursor.close()
-    if 'connection' in locals() and connection.is_connected():
-      connection.close()
-
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        query = "SELECT * FROM user_data WHERE user_email = %s"
+        cursor.execute(query, (email,))
+        user = cursor.fetchone()
+        return user
+    except Error as e:
+        print(f"Database error: {e}")
+        raise HTTPException(status_code=500, detail="Database connection failed.")
+    finally:
+        if 'cursor' in locals() and cursor:
+            cursor.close()
+        if 'connection' in locals() and connection.is_connected():
+            connection.close()
 
 # 관리자 확인
 def is_admin(email: str):
-  try:
-    connection = get_connection()
-    cursor = connection.cursor(dictionary=True)
-    query = "SELECT is_admin FROM permissions WHERE user_email = %s"
-    cursor.execute(query, (email,))
-    result = cursor.fetchone()
-    return result and result["is_admin"]
-  finally:
-    if connection.is_connected():
-      cursor.close()
-      connection.close()
-
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        query = "SELECT is_admin FROM permissions WHERE user_email = %s"
+        cursor.execute(query, (email,))
+        result = cursor.fetchone()
+        return result and result["is_admin"]
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
 
 # 1. 이메일 중복 및 형식 확인
 @router.post("/signup/check-email")
@@ -163,6 +137,7 @@ def signup_send_code(request: SignUpRequest):
   - 이메일 중복 확인 후 인증 이메일 전송\n
   - Redis에 사용자 정보 저장 (10분 유지)
   """
+
   hashed_password = hash_password(request.password)
 
   token = create_access_token(data={"sub": request.email},
@@ -193,43 +168,21 @@ def confirm_email(token: str = Query(...)):
     payload = verify_token(token)
     email = payload.get("sub")
 
-        if not email:
-            raise HTTPException(status_code=400, detail="유효하지 않은 토큰입니다.")
+    if not email:
+      return RedirectResponse(url="/signup/error?error_type=invalid_token")
 
-        # Redis에서 인증 상태 업데이트
-        redis_client.setex(f"verified:{email}", timedelta(minutes=30), "true")
+    # Check if user already exists
+    if find_user_by_email(email):
+      return RedirectResponse(url="/login")
 
-        # 성공 페이지 반환 - 로그인 페이지로 이동하도록 
-        return HTMLResponse(content=f"""
-        <html>
-            <body>
-                <h1>이메일 인증 완료</h1>
-                <p>이메일 인증이 성공적으로 완료되었습니다!</p>
-            </body>
-        </html>
-        """, status_code=200)
+    # Retrieve user data from Redis
+    user_data_json = redis_client.get(f"signup_data:{email}")
+    if not user_data_json:
+      return RedirectResponse(url="/signup/error?error_type=missing_info")
 
-    except Exception as e:
-        # 실패 페이지 반환
-        return HTMLResponse(content=f"""
-        <html>
-            <body>
-                <h1>이메일 인증 실패</h1>
-                <p>인증 토큰이 유효하지 않거나 만료되었습니다.</p>
-            </body>
-        </html>
-        """, status_code=400)
+    user_data = json.loads(user_data_json)
 
-# ✅ 4. 회원가입 완료
-@router.post("/signup/complete")
-def complete_signup(request: SignUpRequest):
-    if not redis_client.get(f"verified:{request.email}"):
-        raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
-
-    if find_user_by_email(request.email):
-        raise HTTPException(status_code=400, detail="이메일이 이미 사용 중입니다.")
-
-    hashed_password = hash_password(request.password)
+    # Save user data to MySQL
     try:
       connection = get_connection()
       cursor = connection.cursor()
@@ -290,83 +243,38 @@ def signup_error(error_type: str = Query("unknown")):
     </html>
     """, status_code=400)
 
-
-# 4. 회원가입 완료 - 로그인 페이지로 연결 혹은 팝업창만 띄우기
-# @router.post("/signup/complete")
-# def complete_signup(request: SignUpRequest):
-#     """
-#     이메일 인증 완료 후 연결되는 api\n
-#     인증 완료되면 사용자가 적은 정보를 클라이언트가 requests\n
-#     db에 저장되면 회원가입 완료
-#     """
-#     if not redis_client.get(f"verified:{request.email}"):
-#         raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
-
-#     if find_user_by_email(request.email):
-#         raise HTTPException(status_code=400, detail="이메일이 이미 사용 중입니다.")
-
-#     hashed_password = hash_password(request.password)
-#     try:
-#         connection = get_connection()
-#         cursor = connection.cursor()
-#         query = (
-#             "INSERT INTO user_data (user_email, user_ps, user_name, jurisdiction, user_dept) "
-#             "VALUES (%s, %s, %s, %s, %s)"
-#         )
-#         cursor.execute(query, (request.email, hashed_password, request.name, request.jurisdiction, request.department))
-#         connection.commit()
-#     finally:
-#         if connection.is_connected():
-#             cursor.close()
-#             connection.close()
-
-#     return {"message": "회원가입이 완료되었습니다."}
-
-
-# ✅ 로그인 API
 @router.post("/login")
 def login_user(request: LoginRequest):
-  user = find_user_by_email(request.email)
-  if not user:
-    raise HTTPException(status_code=404, detail="존재하지 않는 이메일입니다.")
+    user = find_user_by_email(request.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="존재하지 않는 이메일입니다.")
 
-  if not verify_password(request.password, user["user_ps"]):
-    raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
+    if not verify_password(request.password, user["user_ps"]):
+        raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
 
-  # 관리자 확인
-  is_admin_user = is_admin(request.email)
+    is_admin_user = is_admin(request.email)
+    access_token = create_access_token(data={"sub": request.email, "admin": is_admin_user}, expires_delta=timedelta(minutes=30))
+    refresh_token = create_refresh_token(data={"sub": request.email}, expires_delta=timedelta(days=7))
 
-  # JWT 토큰 생성 (Access & Refresh)
-  access_token = create_access_token(
-      data={"sub": request.email, "admin": is_admin_user},
-      expires_delta=timedelta(minutes=30)
-  )
-  refresh_token = create_refresh_token(
-      data={"sub": request.email}, expires_delta=timedelta(days=7)
-  )
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "is_admin": is_admin_user
+    }
 
-  return {
-    "access_token": access_token,
-    "refresh_token": refresh_token,
-    "token_type": "bearer",
-    "is_admin": is_admin_user
-  }
-
-
-# ✅ 로그아웃
 @router.post("/logout")
 def logout(request: LogoutRequest):
-  """logout"""
-  payload = verify_token(request.token)
-  if not payload:
-    raise HTTPException(status_code=401, detail="만료된 토큰입니다.")
+    payload = verify_token(request.token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="만료된 토큰입니다.")
 
-  expiration_time = payload.get("exp")
-  current_time = datetime.now(timezone.utc).timestamp()
-  remaining_time = max(int(expiration_time - current_time), 0)
+    expiration_time = payload.get("exp")
+    current_time = datetime.now(timezone.utc).timestamp()
+    remaining_time = max(int(expiration_time - current_time), 0)
+    add_token_to_blacklist(request.token, remaining_time)
 
-  add_token_to_blacklist(request.token, remaining_time)
-  return {"message": "로그아웃 되었습니다."}
+    return {"message": "로그아웃 되었습니다."}
 
 
 # ✅ refresh token으로 access token 요청
