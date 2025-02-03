@@ -7,12 +7,9 @@ import json
 from mysql.connector import Error
 from app.database.mysql_connect import get_connection
 from app.core.security import hash_password, verify_password
-from app.core.email_utils import generate_verification_code, \
-  send_verification_email, send_signup_email
-from app.core.jwt_utils import create_access_token, verify_token, \
-  create_refresh_token
-from app.core.token_blacklist import add_token_to_blacklist, \
-  is_token_blacklisted
+from app.core.email_utils import generate_verification_code, send_verification_email, send_signup_email
+from app.core.jwt_utils import create_access_token, verify_token, create_refresh_token
+from app.core.token_blacklist import add_token_to_blacklist, is_token_blacklisted
 
 router = APIRouter()
 
@@ -29,26 +26,37 @@ verification_codes = {}
 
 # requests 모델 정의
 class SignUpRequest(BaseModel):
-  email: EmailStr
-  password: str
-  confirm_password: str
-  name: str
-  jurisdiction: str
-  department: str
+    email: EmailStr
+    password: str
+    confirm_password: str
+    name: str
+    jurisdiction: str
+    department: str
 
-  @field_validator("password")
-  def validate_password(cls, value):
-    if len(value) < 8 or not any(c.isupper() for c in value) or not any(
-        c.islower() for c in value) or not any(
-        c in "!@#$%^&*()" for c in value):
-      raise ValueError("8자리 이상, 대소문자 포함, !@#$%^&*() 중 하나 이상 포함")
-    return value
+    @field_validator("password")
+    def validate_password(cls, value):
+        """비밀번호 유효성 검증 - 8자리 이상, 대소문자 포함, 특수문자 포함"""
+        if len(value) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail="비밀번호는 최소 8자리 이상이어야 합니다."
+            )
+        if not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c in "!@#$%^&*()" for c in value):
+            raise HTTPException(
+                status_code=400,
+                detail="비밀번호는 대소문자 및 !@#$%^&*() 중 하나 이상 포함해야 합니다."
+            )
+        return value
 
-  @field_validator("confirm_password")
-  def passwords_match(cls, value, info):
-    if "password" in info.data and value != info.data["password"]:
-      raise ValueError("비밀번호가 다릅니다.")
-    return value
+    @field_validator("confirm_password")
+    def passwords_match(cls, value, info):
+        """비밀번호 확인 - 입력한 두 비밀번호가 일치하는지 검증"""
+        if "password" in info.data and value != info.data["password"]:
+            raise HTTPException(
+                status_code=400,
+                detail="입력한 비밀번호가 일치하지 않습니다."
+            )
+        return value
 
 
 class LoginRequest(BaseModel):
@@ -70,24 +78,34 @@ class VerifyCodeRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-  reset_token: str
-  new_password: str
-  confirm_password: str
+    reset_token: str
+    new_password: str
+    confirm_password: str
 
-  @field_validator("new_password")
-  def validate_password(cls, value):
-    if len(value) < 8 or not any(c.isupper() for c in value) or not any(
-        c.islower() for c in value) or not any(
-        c in "!@#$%^&*()" for c in value):
-      raise ValueError("8자리 이상, 대소문자 포함, !@#$%^&*() 중 하나 이상 포함")
-    return value
+    @field_validator("new_password")
+    def validate_password(cls, value):
+        """비밀번호 유효성 검증 - 8자리 이상, 대소문자 포함, 특수문자 포함"""
+        if len(value) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail="새 비밀번호는 최소 8자리 이상이어야 합니다."
+            )
+        if not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c in "!@#$%^&*()" for c in value):
+            raise HTTPException(
+                status_code=400,
+                detail="새 비밀번호는 대소문자 및 !@#$%^&*() 중 하나 이상 포함해야 합니다."
+            )
+        return value
 
-  @field_validator("confirm_password")
-  def passwords_match(cls, value, info):
-    if "password" in info.data and value != info.data["password"]:
-      raise ValueError("비밀번호가 다릅니다.")
-    return value
-
+    @field_validator("confirm_password")
+    def passwords_match(cls, value, info):
+        """비밀번호 확인 - 입력한 두 비밀번호가 일치하는지 검증"""
+        if "new_password" in info.data and value != info.data["new_password"]:
+            raise HTTPException(
+                status_code=400,
+                detail="입력한 새 비밀번호가 일치하지 않습니다."
+            )
+        return value
 
 # 사용자 확인
 def find_user_by_email(email: str):
@@ -145,7 +163,6 @@ def signup_send_code(request: SignUpRequest):
   - 이메일 중복 확인 후 인증 이메일 전송\n
   - Redis에 사용자 정보 저장 (10분 유지)
   """
-
   hashed_password = hash_password(request.password)
 
   token = create_access_token(data={"sub": request.email},
@@ -289,10 +306,10 @@ def signup_error(error_type: str = Query("unknown")):
 def login_user(request: LoginRequest):
   user = find_user_by_email(request.email)
   if not user:
-    raise HTTPException(status_code=404, detail="User not found.")
+    raise HTTPException(status_code=404, detail="존재하지 않는 이메일입니다.")
 
   if not verify_password(request.password, user["user_ps"]):
-    raise HTTPException(status_code=401, detail="Invalid credentials.")
+    raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
 
   # 관리자 확인
   is_admin_user = is_admin(request.email)
@@ -320,7 +337,7 @@ def logout(request: LogoutRequest):
   """logout"""
   payload = verify_token(request.token)
   if not payload:
-    raise HTTPException(status_code=401, detail="Invalid or expired token.")
+    raise HTTPException(status_code=401, detail="만료된 토큰입니다.")
 
   expiration_time = payload.get("exp")
   current_time = datetime.now(timezone.utc).timestamp()
@@ -338,7 +355,7 @@ def refresh_token(refresh_token: str):
   email = decoded_token.get("sub")
 
   if not email:
-    raise HTTPException(status_code=401, detail="Invalid refresh token.")
+    raise HTTPException(status_code=401, detail="인증이 만료되었습니다. 다시 로그인하세요.")
 
   # 관리자 체크
   is_admin_user = is_admin(email)
@@ -361,11 +378,11 @@ def refresh_token(refresh_token: str):
 def protected_route(token: str = Header(...)):
   """토큰 확인하기 - debugging용"""
   if is_token_blacklisted(token):
-    raise HTTPException(status_code=401, detail="Token is blacklisted.")
+    raise HTTPException(status_code=401, detail="토큰이 블랙리스트에 등록되었습니다.")
 
   payload = verify_token(token)
   if not payload:
-    raise HTTPException(status_code=401, detail="Invalid or expired token.")
+    raise HTTPException(status_code=401, detail="만료된 토큰입니다.")
 
   return {"message": f"You are authenticated as {payload['sub']}."}
 
@@ -416,7 +433,7 @@ def reset_password(request: ResetPasswordRequest):
   """비밀번호 재설정하기"""
   payload = verify_token(request.reset_token)
   if not payload or payload.get("action") != "password_reset":
-    raise HTTPException(status_code=401, detail="Invalid reset token.")
+    raise HTTPException(status_code=401, detail="인증이 만료되었습니다. 인증번호를 다시 발송하세요.")
 
   email = payload.get("sub")
   user = find_user_by_email(email)

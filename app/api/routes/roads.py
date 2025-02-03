@@ -12,8 +12,7 @@ router = APIRouter()
 
 # Connect to Redis for caching recommendations
 try:
-  redis_client = redis.StrictRedis(host="localhost", port=6379, db=0,
-                                   decode_responses=True)
+  redis_client = redis.StrictRedis(host="localhost", port=6379, db=0,decode_responses=True)
 except Exception as e:
   print(f"Redis connection failed: {e}")
   redis_client = None

@@ -32,17 +32,17 @@ def create_refresh_token(data: dict, expires_delta: timedelta):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def verify_token(token: Optional[str] = Header(None), token_type: str = "access"):
+def verify_token(token: str, token_type: str = "access"):
     """JWT 토큰을 디코딩하고 유효성을 검사하는 함수"""
     if not token:
         raise HTTPException(status_code=401, detail="인증 토큰이 없습니다.")
 
     try:
-        # JWT 토큰 디코딩
+        # ✅ JWT 토큰 디코딩
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
-        # "admin" 뿐만 아니라 "sub"도 포함하는지 확인
-        if token_type == "access" and "admin" not in payload and "sub" not in payload:
+        # ✅ "sub" 필드는 일반 사용자 식별, "admin"은 관리자 식별
+        if token_type == "access" and "sub" not in payload:
             raise HTTPException(status_code=401, detail="잘못된 접근 토큰 형식입니다.")
 
         return payload  # 정상적인 경우 페이로드 반환
