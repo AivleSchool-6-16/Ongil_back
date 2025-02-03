@@ -86,7 +86,7 @@ def send_file_email(to_email: str, subject: str, body: str, attachment_path: str
     msg["Subject"] = subject
     msg.set_content(body)
 
-    # ✅ Attach file if provided
+    # Attach file if provided
     if attachment_path:
         try:
             with open(attachment_path, "rb") as file:
@@ -94,12 +94,12 @@ def send_file_email(to_email: str, subject: str, body: str, attachment_path: str
         except FileNotFoundError:
             raise ValueError(f"❌ File not found: {attachment_path}")
 
-    # ✅ Send email
+    # Send email
     try:
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()  # Secure connection
             server.login(sender_email, sender_password)  # Login
             server.send_message(msg)
-        print(f"✅ Email sent to {to_email}")
+        print(f"Email sent to {to_email}")
     except Exception as e:
         print(f"❌ Email sending failed: {e}")
