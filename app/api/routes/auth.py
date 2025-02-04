@@ -173,7 +173,7 @@ def confirm_email(token: str = Query(...)):
 
     # Check if user already exists
     if find_user_by_email(email):
-      return RedirectResponse(url="/login")
+      return RedirectResponse(url="localhost:5173/")
 
     # Retrieve user data from Redis
     user_data_json = redis_client.get(f"signup_data:{email}")
@@ -208,7 +208,7 @@ def confirm_email(token: str = Query(...)):
     redis_client.delete(f"signup_data:{email}")
 
     # Redirect to login page upon success
-    return RedirectResponse(url="/login")
+    return RedirectResponse(url="localhost:5173/")
 
   except Exception:
     return RedirectResponse(url="/signup/error?error_type=unknown")

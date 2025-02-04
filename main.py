@@ -11,6 +11,8 @@ from app.api.routes import admin, auth, board, mypage, roads
 from app.core.token_blacklist import is_token_blacklisted
 from app.core.jwt_utils import verify_token
 from app.services.sync_views import sync_redis_to_mysql
+from fastapi.exceptions import RequestValidationError
+from starlette.responses import JSONResponse
 from app.api.socket import socket_app 
 
 # ✅ MySQL 연결 설정
@@ -48,27 +50,52 @@ async def lifespan(app: FastAPI):
 
 # ✅ 웹 선언
 app = FastAPI(lifespan=lifespan)
-app.mount("/ws", socket_app) # ✅ WebSocket 서버 마운트 (board.py에서 설정한 socket_app과 연결)
+app.mount("/ws", socket_app)
+
 
 # 입력형식 오류 handler
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=400,  
-        content={"detail": "입력 형식이 올바르지 않습니다."}
-    )
+async def validation_exception_handler(request: Request,
+    exc: RequestValidationError):
+  return JSONResponse(
+      status_code=400,
+      content={"detail": "입력 형식이 올바르지 않습니다."}
+  )
 
-# ✅ Middleware
+
+# ✅ 토큰 검사를 제외할 엔드포인트 목록
+EXCLUDED_PATHS = ["/auth/login", "/auth/signup",
+                  "/open-api", "/auth/signup/error", "/auth/logout",
+                  "/auth/signup/check-email",
+                  "/auth/signup/confirm",
+                  "/auth/signup/send-code" "/board"]  # 토큰이 필요 없는 엔드포인트 추가
+
+
 @app.middleware("http")
 async def check_token_blacklist(request: Request, call_next):
-  
-    token = request.headers.get("token")
-    if token:
-        if is_token_blacklisted(token):
-            raise HTTPException(status_code=401, detail="토큰이 블랙리스트에 등록되었습니다.")
-        if not verify_token(token):
-            raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다.")
+  # 1) "Authorization"이 아니라, "token"이라는 헤더에서 토큰 추출
+  token = request.headers.get("token", "")
+
+  # 토큰 검사를 제외할 엔드포인트
+  if request.url.path in EXCLUDED_PATHS:
     return await call_next(request)
+
+  # (선택) 토큰이 없으면 바로 401을 주거나, 혹은 요청을 통과시킬지 결정
+  if not token:
+    # 보통 인증이 필요한 API라면 401을 반환
+    raise HTTPException(status_code=401, detail="토큰이 존재하지 않습니다.")
+    # return await call_next(request)  # <- 스킵하려면 이렇게
+
+  # 블랙리스트 검사
+  if is_token_blacklisted(token):
+    raise HTTPException(status_code=401, detail="토큰이 블랙리스트에 등록되었습니다.")
+
+  # 유효성 검사
+  if not verify_token(token):
+    raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다.")
+
+  return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,13 +105,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # ✅ 라우터 추가
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(board.router, prefix="/board", tags=["Board"])
 app.include_router(mypage.router, prefix="/mypage", tags=["MyPage"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 app.include_router(roads.router, prefix="/roads", tags=["Roads"])
+
 
 @app.get("/")
 def root():
