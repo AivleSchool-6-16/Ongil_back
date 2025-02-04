@@ -13,7 +13,7 @@ from app.core.jwt_utils import verify_token
 from app.services.sync_views import sync_redis_to_mysql
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
-from app.api.socket import socket_app 
+from app.api.socket import socket_app
 
 # ✅ MySQL 연결 설정
 DATABASE_URL = "mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
@@ -29,6 +29,7 @@ def get_db():
     yield db
   finally:
     db.close()
+
 
 # ✅ 조회수 임시저장 db에 sync
 @asynccontextmanager
@@ -50,7 +51,7 @@ async def lifespan(app: FastAPI):
 
 # ✅ 웹 선언
 app = FastAPI(lifespan=lifespan)
-app.mount("/ws", socket_app)
+app.mount("/socket.io", socket_app)
 
 
 # 입력형식 오류 handler
@@ -64,33 +65,37 @@ async def validation_exception_handler(request: Request,
 
 
 # ✅ 토큰 검사를 제외할 엔드포인트 목록
-EXCLUDED_PATHS = ["/auth/login", "/auth/signup",
-                  "/open-api", "/auth/signup/error", "/auth/logout",
-                  "/auth/signup/check-email",
-                  "/auth/signup/confirm",
-                  "/auth/signup/send-code" "/board"]  # 토큰이 필요 없는 엔드포인트 추가
+EXCLUDED_PATHS = [
+  "/auth/login",
+  "/auth/signup",
+  "/docs",
+  "/open-api",
+  "/auth/signup/error",
+  "/auth/logout",
+  "/auth/signup/check-email",
+  "/auth/signup/confirm",
+  "/auth/signup/send-code",
+  "/board/",
+  "/socket.io"  # '/socket.io'로 시작하는 모든 경로를 제외
+]
 
 
 @app.middleware("http")
 async def check_token_blacklist(request: Request, call_next):
-  # 1) "Authorization"이 아니라, "token"이라는 헤더에서 토큰 추출
-  token = request.headers.get("token", "")
-
-  # 토큰 검사를 제외할 엔드포인트
-  if request.url.path in EXCLUDED_PATHS:
+  # 웹소켓 업그레이드 요청일 경우 또는 EXCLUDED_PATHS에 해당하는 경로면 토큰 검증 건너뛰기
+  if request.headers.get("upgrade", "").lower() == "websocket":
     return await call_next(request)
 
-  # (선택) 토큰이 없으면 바로 401을 주거나, 혹은 요청을 통과시킬지 결정
-  if not token:
-    # 보통 인증이 필요한 API라면 401을 반환
-    raise HTTPException(status_code=401, detail="토큰이 존재하지 않습니다.")
-    # return await call_next(request)  # <- 스킵하려면 이렇게
+  # 경로가 EXCLUDED_PATHS 중 하나로 시작하면 건너뛰기
+  for path in EXCLUDED_PATHS:
+    if request.url.path.startswith(path):
+      return await call_next(request)
 
-  # 블랙리스트 검사
+  token = request.headers.get("token", "")
+  if not token:
+    return await call_next(request)
   if is_token_blacklisted(token):
     raise HTTPException(status_code=401, detail="토큰이 블랙리스트에 등록되었습니다.")
-
-  # 유효성 검사
   if not verify_token(token):
     raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다.")
 
