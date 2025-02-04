@@ -1,21 +1,18 @@
 # 문의 게시판
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from fastapi import File, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
-import magic
 import redis
 import os
-import subprocess
-import uuid
 import asyncio
 import socketio
 from urllib.parse import parse_qs
-
 from app.database.mysql_connect import get_connection
 from app.core.jwt_utils import verify_token, get_authenticated_user
+from app.api.socket import notify_new_post, notify_updated_post, notify_new_comment
 
 router = APIRouter()
 
@@ -29,104 +26,19 @@ try:
 except Exception as e:
     print(f"Redis connection failed: {e}")
     redis_client = None
-    
-# 📌 WebSocket (Socket.IO) 설정
-sio = socketio.AsyncServer(
-    async_mode="asgi",
-    cors_allowed_origins=["*"],  # 모든 CORS 허용
-)
-socket_app = socketio.ASGIApp(sio)
-
-def scan_file_with_clamav(file_path: str) -> bool: # clamav 파일 검사
-    """
-    ClamAV (clamscan)으로 파일을 검사하는 함수.
-    return:
-      - True : 바이러스 미검출(OK)
-      - False: 바이러스 발견 또는 오류
-    """
-    # clamscan 의 return code
-    # 0 => 악성코드 없음
-    # 1 => 악성코드 발견
-    # 2 => 사용법 오류 or 스캔 중 오류
-    cmd = [
-        "clamscan",
-        "--infected",
-        "--no-summary",  
-        "--stdout",      # 결과를 stdout에 출력
-        file_path
-    ]
-
-    try:
-        process = subprocess.run(cmd, capture_output=True, text=True)
-        if process.returncode == 0:
-            # 0 => OK
-            print(f"[ClamAV] No virus found in {file_path}")
-            return True
-        elif process.returncode == 1:
-            # 1 => 바이러스 발견
-            print(f"[ClamAV] Virus found in {file_path} !!")
-            print("Output:", process.stdout)
-            return False
-        else:
-            # 2 => 스캔 오류
-            print("[ClamAV] Error scanning file:", process.stderr)
-            return False
-    except FileNotFoundError:
-        print("[ClamAV] clamscan command not found. Please install ClamAV.")
-        return False
-
-# 실시간 게시판 데이터 저장 (임시)
-active_connections = []
-
-# ✅ 1. WebSocket 연결 관리
-@sio.event
-async def connect(sid, environ):
-    query_params = parse_qs(environ.get("QUERY_STRING", ""))  # ✅ URL에서 Query Parameter 파싱
-    token = query_params.get("token", [None])[0]  # `token` 값 가져오기
-
-    if not token:
-        print("❌ WebSocket 인증 실패: 토큰 없음")
-        await sio.disconnect(sid)
-        return
-
-    payload = verify_token(token)  # ✅ JWT 검증
-    if not payload:
-        print("❌ WebSocket 인증 실패: 유효하지 않은 토큰")
-        await sio.disconnect(sid)
-        return
-
-    print(f"✅ WebSocket 인증 성공: {payload['sub']} 연결됨")
-
-@sio.on("disconnect")
-async def disconnect(sid):
-    print(f"Client disconnected: {sid}")
-    active_connections.remove(sid)
-
-# ✅ 2. WebSocket을 통한 실시간 게시글 업데이트
-async def notify_new_post(post):
-    """ 새로운 게시글을 WebSocket을 통해 모든 클라이언트에게 전송 """
-    await sio.emit("newPost", post)
-
-async def notify_updated_post(post):
-    """ 게시글이 수정되었을 때 WebSocket으로 전송 """
-    await sio.emit("updatedPost", post)
-
-async def notify_new_comment(comment):
-    """ 새로운 댓글이 달렸을 때 WebSocket으로 전송 """
-    await sio.emit("newComment", comment)
 
 
 # 게시글 등록 요청 모델
 class PostCreateRequest(BaseModel):
     board_id: int  # 0: 비밀글, 1: 공개글
     post_title: str
-    post_category: int
+    post_category: str
     post_text: str
 
 # 게시글 수정 요청 모델
 class PostUpdateRequest(BaseModel):
     post_title: Optional[str] = None
-    post_category: Optional[int] = None
+    post_category: Optional[str] = None
     post_text: Optional[str] = None
 
 # 댓글 등록 요청 모델
@@ -136,10 +48,6 @@ class CommentRequest(BaseModel):
 # 관리자 답변 요청 모델
 class AnswerRequest(BaseModel):
     answer: str
-
-# ✅ 6. FastAPI 서버에 WebSocket 등록
-def include_socketio(app):
-    app.mount("/ws", socket_app)
 
 # ✅ 1. 전체 게시글 조회 (조회수 실시간 반영)
 @router.get("/")
@@ -356,46 +264,15 @@ def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_au
         
 # ✅ 파일 업로드 - 게시글 작성 혹은 수정 중에만
 @router.post("/{post_id}/upload")
-async def upload_file(post_id: int, file: UploadFile = File(...), user: dict = Depends(verify_token)):
+def upload_file(post_id: int, file: UploadFile = File(...), user: dict = Depends(get_authenticated_user)):
+    """파일 업로드 - 게시글 작성 혹은 수정 중에만 연결 """
     try:
-        # 1) 파일 크기 검사(10MB 이하)
+        # Validate file size (Example: Max 10MB)
         MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-        content = await file.read()
-        file_size = len(content)
+        file_size = file.file.seek(0, 2)  # Get file size
+        file.file.seek(0)  # Reset file pointer
         if file_size > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail="파일의 최대 크기는 10MB입니다")
-
-        # 2) 파일 확장자 검사 (선택적으로 가능)
-        #    예: 이미지 파일만 허용한다고 했을 때
-        ext = file.filename.rsplit('.', 1)[-1].lower()
-        if ext not in ["png", "jpg", "jpeg", "gif"]:
-            raise HTTPException(status_code=400, detail="허용되지 않은 확장자입니다")
-
-        # 3) MIME 타입 검사 (python-magic 등 활용 - 선택)
-        #    임시 파일에 저장 후 magic으로 검사
-        temp_filename = f"{uuid.uuid4()}"
-        temp_file_path = os.path.join(UPLOAD_FOLDER, temp_filename)
-
-        # 파일 저장(비동기 모드이므로 async write 사용)
-        with open(temp_file_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
-
-        # MIME 타입 검사     
-        mime = magic.from_file(temp_file_path, mime=True)
-        print("Detected MIME:", mime)
-
-        # 이미지 MIME인지 확인
-        if not mime.startswith("image/"):
-            raise HTTPException(status_code=400, detail="허용되지 않은 파일 형식입니다")
-        
-        # 4) ClamAV 검사
-        is_clean = scan_file_with_clamav(temp_file_path)
-        if not is_clean:
-            # 감염되었거나 오류 => 파일 삭제 후 에러 반환
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-                raise HTTPException(status_code=400, detail="파일이 감염되었거나 오류가 발생했습니다")
+            raise HTTPException(status_code=400, detail="File size exceeds 10MB limit.")
 
         # Construct file path
         file_location = os.path.join(UPLOAD_FOLDER, file.filename)

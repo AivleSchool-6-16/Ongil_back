@@ -5,12 +5,13 @@ from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from starlette.responses import JSONResponse
 from app.api.routes import admin, auth, board, mypage, roads
 from app.core.token_blacklist import is_token_blacklisted
 from app.core.jwt_utils import verify_token
 from app.services.sync_views import sync_redis_to_mysql
-from fastapi.exceptions import RequestValidationError
-from starlette.responses import JSONResponse
+from app.api.socket import socket_app 
 
 # ✅ MySQL 연결 설정
 DATABASE_URL = "mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
@@ -27,7 +28,7 @@ def get_db():
   finally:
     db.close()
 
-
+# ✅ 조회수 임시저장 db에 sync
 @asynccontextmanager
 async def lifespan(app: FastAPI):
   print("🚀 App is starting... Initializing scheduler")
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
 
 # ✅ 웹 선언
 app = FastAPI(lifespan=lifespan)
+app.mount("/ws", socket_app) # ✅ WebSocket 서버 마운트 (board.py에서 설정한 socket_app과 연결)
 
 # 입력형식 오류 handler
 @app.exception_handler(RequestValidationError)
@@ -60,13 +62,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.middleware("http")
 async def check_token_blacklist(request: Request, call_next):
   
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.headers.get("token")
     if token:
         if is_token_blacklisted(token):
             raise HTTPException(status_code=401, detail="토큰이 블랙리스트에 등록되었습니다.")
         if not verify_token(token):
             raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다.")
-
     return await call_next(request)
 
 app.add_middleware(
@@ -84,10 +85,6 @@ app.include_router(board.router, prefix="/board", tags=["Board"])
 app.include_router(mypage.router, prefix="/mypage", tags=["MyPage"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 app.include_router(roads.router, prefix="/roads", tags=["Roads"])
-
-# ✅ WebSocket 서버 마운트 (board.py에서 설정한 socket_app과 연결)
-from app.api.routes.board import socket_app
-app.mount("/ws", socket_app)
 
 @app.get("/")
 def root():
