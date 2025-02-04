@@ -1,6 +1,7 @@
 import socketio
 from urllib.parse import parse_qs
 from app.core.jwt_utils import verify_token  # Import JWT verification function
+from datetime import datetime
 
 # ✅ Create WebSocket Server
 sio = socketio.AsyncServer(
@@ -42,10 +43,27 @@ async def disconnect(sid):
   active_connections.remove(sid)
 
 
-# WebSocket을 통한 실시간 게시글 업데이트
+def serialize_datetime(obj):
+  """
+  만약 값이 datetime이면 ISO 포맷 문자열로 변환
+  """
+  if isinstance(obj, datetime):
+    return obj.isoformat()
+  return obj
+
+
+def serialize_post(post: dict) -> dict:
+  """
+  post 딕셔너리 내의 모든 datetime 객체를 문자열로 변환
+  """
+  return {key: serialize_datetime(value) for key, value in post.items()}
+
+
 async def notify_new_post(post):
   """ 새로운 게시글을 WebSocket을 통해 모든 클라이언트에게 전송 """
-  await sio.emit("newPost", post)
+  # datetime 필드가 문자열로 변환된 새로운 딕셔너리 생성
+  post_serialized = serialize_post(post)
+  await sio.emit("newPost", post_serialized)
 
 
 async def notify_updated_post(post):

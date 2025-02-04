@@ -75,7 +75,9 @@ EXCLUDED_PATHS = [
   "/auth/signup/check-email",
   "/auth/signup/confirm",
   "/auth/signup/send-code",
+  "/board",  # '/board'로 시작하는 모든 경로를 제외
   "/board/",
+
   "/socket.io"  # '/socket.io'로 시작하는 모든 경로를 제외
 ]
 
