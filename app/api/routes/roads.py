@@ -5,18 +5,18 @@ from datetime import datetime
 from typing import List
 import redis
 import json
+import pandas as pd
 from app.core.jwt_utils import verify_token, get_authenticated_user
 from app.database.mysql_connect import get_connection
+from app.models.model import train_model
 
 router = APIRouter()
 
-# Connect to Redis for caching recommendations
 try:
   redis_client = redis.StrictRedis(host="localhost", port=6379, db=0,decode_responses=True)
 except Exception as e:
   print(f"Redis connection failed: {e}")
   redis_client = None
-
 
 # User input model
 class UserInput(BaseModel):
@@ -162,3 +162,4 @@ def request_road_file(log_id: int,
   finally:
     cursor.close()
     connection.close()
+

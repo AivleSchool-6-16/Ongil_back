@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.IO WebSocket 테스트</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script> 
+</head>
+<body>
+    <h1>Socket.IO WebSocket 테스트</h1>
+    <button onclick="connectSocket()">🔗 Socket.IO 연결</button>
+    <div id="log"></div>
+
+    <script>
+        let socket;
+    
+        function logMessage(message) {
+            document.getElementById("log").innerHTML += `<p>${message}</p>`;
+        }
+    
+        function connectSocket() {
+            const token = "-token-";  // 실제 인증 토큰 입력
+    
+            // ✅ FastAPI Socket.IO 서버에 연결
+            socket = io("http://localhost:8000", {
+                path: "/socket.io",
+                transports: ["websocket"],
+                query: { token: token }
+            });
+    
+            // ✅ 연결 성공
+            socket.on("connect", () => {
+                logMessage(`✅ Socket.IO 연결 성공! (ID: ${socket.id})`);
+            });
+    
+            // ✅ 서버에서 메시지를 받을 때 실행
+            socket.on("message", (data) => {
+                logMessage(`📩 서버로부터 메시지 수신: ${JSON.stringify(data)}`);
+            });
+    
+            // ✅ 서버에서 게시글 알림 수신
+            socket.on("newPost", (post) => {
+                logMessage(`🆕 새로운 게시글: <b>${post.post_title}</b> - ${post.post_text}`);
+    
+                // 게시글을 동적으로 추가
+                const logDiv = document.getElementById("log");
+                const newPostElement = document.createElement("div");
+                newPostElement.innerHTML = `
+                    <h3>${post.post_title}</h3>
+                    <p>${post.post_text}</p>
+                    <small>작성자: ${post.user_email} | 시간: ${post.post_time}</small>
+                    <hr>
+                `;
+                logDiv.prepend(newPostElement);  // 최신 게시글이 위로 오도록 추가
+            });
+    
+            // ✅ 연결 해제 이벤트
+            socket.on("disconnect", () => {
+                logMessage("❌ Socket.IO 연결 종료");
+            });
+    
+            // ✅ 연결 오류 발생 시 처리
+            socket.on("connect_error", (error) => {
+                logMessage("❌ Socket.IO 연결 오류 발생: " + error.message);
+                console.error(error);
+            });
+        }
+    </script>
+</body>
+</html>

@@ -34,7 +34,7 @@ def get_file_requests(token: str = Depends(get_authenticated_user)):
         FROM rec_road_log r
         JOIN user_data u ON r.user_email = u.user_email
         WHERE r.ask_check = 1
-        ORDER BY r.c_date DESC
+        ORDER BY r.c_date
         """
         cursor.execute(query)
         requests = cursor.fetchall()

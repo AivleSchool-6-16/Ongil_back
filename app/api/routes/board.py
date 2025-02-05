@@ -10,12 +10,9 @@ import redis
 import os
 import subprocess
 import uuid
-import asyncio
-import socketio
-from urllib.parse import parse_qs
 from app.database.mysql_connect import get_connection
 from app.core.jwt_utils import verify_token, get_authenticated_user
-from app.api.socket import notify_new_post, notify_updated_post, notify_new_comment
+from app.api.socket import *
 
 router = APIRouter()
 
@@ -31,25 +28,14 @@ except Exception as e:
   print(f"Redis connection failed: {e}")
   redis_client = None
 
-# 📌 WebSocket (Socket.IO) 설정
-sio = socketio.AsyncServer(
-    async_mode="asgi",
-    cors_allowed_origins=["*"],  # 모든 CORS 허용
-)
-socket_app = socketio.ASGIApp(sio)
 
-
-def scan_file_with_clamav(file_path: str) -> bool:  # clamav 파일 검사
+def scan_file_with_clamav(file_path: str) -> bool:
   """
   ClamAV (clamscan)으로 파일을 검사하는 함수.
   return:
     - True : 바이러스 미검출(OK)
     - False: 바이러스 발견 또는 오류
   """
-  # clamscan 의 return code
-  # 0 => 악성코드 없음
-  # 1 => 악성코드 발견
-  # 2 => 사용법 오류 or 스캔 중 오류
   cmd = [
     "clamscan",
     "--infected",
@@ -61,16 +47,13 @@ def scan_file_with_clamav(file_path: str) -> bool:  # clamav 파일 검사
   try:
     process = subprocess.run(cmd, capture_output=True, text=True)
     if process.returncode == 0:
-      # 0 => OK
       print(f"[ClamAV] No virus found in {file_path}")
       return True
     elif process.returncode == 1:
-      # 1 => 바이러스 발견
       print(f"[ClamAV] Virus found in {file_path} !!")
       print("Output:", process.stdout)
       return False
     else:
-      # 2 => 스캔 오류
       print("[ClamAV] Error scanning file:", process.stderr)
       return False
   except FileNotFoundError:
@@ -78,20 +61,19 @@ def scan_file_with_clamav(file_path: str) -> bool:  # clamav 파일 검사
     return False
 
 
-
 # 게시글 등록 요청 모델
 class PostCreateRequest(BaseModel):
-    board_id: int  # 0: 비밀글, 1: 공개글
-    post_title: str
-    post_category: str
-    post_text: str
+  board_id: int  # 0: 비밀글, 1: 공개글
+  post_title: str
+  post_category: str
+  post_text: str
 
 
 # 게시글 수정 요청 모델
 class PostUpdateRequest(BaseModel):
-    post_title: Optional[str] = None
-    post_category: Optional[str] = None
-    post_text: Optional[str] = None
+  post_title: Optional[str] = None
+  post_category: Optional[str] = None
+  post_text: Optional[str] = None
 
 
 # 댓글 등록 요청 모델
@@ -165,39 +147,47 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user),
 
 # ✅ 3. 게시글 작성
 @router.post("/")
-async def create_post(request: PostCreateRequest,
-    user: dict = Depends(get_authenticated_user)):
-  """게시글 작성 """
-  try:
-    connection = get_connection()
-    cursor = connection.cursor()
+async def create_post(request: PostCreateRequest, user: dict = Depends(get_authenticated_user)):
+    """게시글 작성 """
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
 
-    query = """
-        INSERT INTO Posts (board_id, user_email, post_title, post_category, post_text, post_time, views)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-    cursor.execute(query, (
-      request.board_id, user["sub"], request.post_title, request.post_category,
-      request.post_text, datetime.now(), 0))
-    connection.commit()
+        query = """
+            INSERT INTO Posts (board_id, user_email, post_title, post_category, post_text, post_time, views)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+        cursor.execute(query, (
+            request.board_id, user["sub"], request.post_title, request.post_category,
+            request.post_text, datetime.now(), 0))
+        connection.commit()
 
-    # 생성된 게시글 가져오기
-    cursor.execute("SELECT * FROM Posts WHERE post_id = LAST_INSERT_ID()")
-    new_post = cursor.fetchone()
+        # 생성된 게시글 가져오기
+        cursor.execute("SELECT * FROM Posts WHERE post_id = LAST_INSERT_ID()")
+        new_post = cursor.fetchone()
 
-    # WebSocket을 통해 새 게시글 알림
-    await notify_new_post(new_post)
+        # WebSocket을 통해 새 게시글 알림 (JSON 변환)
+        post_data = {
+            "post_id": new_post[0],
+            "board_id": new_post[1],
+            "user_email": new_post[2],
+            "post_title": new_post[3],
+            "post_category": new_post[4],
+            "post_text": new_post[5],
+            "post_time": new_post[6].isoformat(),
+            "views": new_post[7]
+        }
+        await notify_new_post(post_data)  # WebSocket 이벤트 전송
 
-    return {"message": "게시글이 등록되었습니다."}
-  finally:
-    cursor.close()
-    connection.close()
+        return {"message": "게시글이 등록되었습니다."}
+    finally:
+        cursor.close()
+        connection.close()
 
 
 # ✅ 4. 게시글 수정
 @router.put("/{post_id}")
-async def update_post(post_id: int, request: PostUpdateRequest,
-    user: dict = Depends(get_authenticated_user)):
+async def update_post(post_id: int, request: PostUpdateRequest, user: dict = Depends(get_authenticated_user)):
   """게시글 수정 - 본인 혹은 관리자만 """
   try:
     connection = get_connection()
@@ -254,9 +244,7 @@ def delete_post(post_id: int, user: dict = Depends(get_authenticated_user)):
 
 # ✅ 6. 게시글 검색
 @router.get("/search/")
-def search_posts(text: Optional[str] = Query(None),
-    author: Optional[str] = Query(None),
-    user: dict = Depends(get_authenticated_user)):
+def search_posts(text: Optional[str] = Query(None),author: Optional[str] = Query(None), user: dict = Depends(get_authenticated_user)):
   """게시글 검색 """
   try:
     connection = get_connection()
@@ -289,8 +277,7 @@ def search_posts(text: Optional[str] = Query(None),
 
 # ✅ 7. 댓글 작성
 @router.post("/{post_id}/comment")
-async def add_comment(post_id: int, request: CommentRequest,
-    user: dict = Depends(get_authenticated_user)):
+async def add_comment(post_id: int, request: CommentRequest, user: dict = Depends(get_authenticated_user)):
   """일반 댓글 작성 """
   try:
     connection = get_connection()
@@ -313,12 +300,76 @@ async def add_comment(post_id: int, request: CommentRequest,
   finally:
     cursor.close()
     connection.close()
+    
+# ✅ 7-1. 댓글 수정
+@router.put("/{post_id}/comment/{comment_id}")
+async def update_comment(post_id: int, comment_id: int, request: CommentRequest, user: dict = Depends(get_authenticated_user)):
+    """ 댓글 수정 """
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
 
+        # 댓글 존재 확인
+        cursor.execute("SELECT * FROM comments WHERE post_id = %s AND id = %s", (post_id, comment_id))
+        existing_comment = cursor.fetchone()
+        if not existing_comment:
+            raise HTTPException(status_code=404, detail="댓글을 찾을 수 없습니다.")
+
+        # 댓글 작성자 확인 (자신의 댓글만 수정 가능)
+        if existing_comment[2] != user["sub"]:  # `user_email` 필드가 2번째 인덱스라고 가정
+            raise HTTPException(status_code=403, detail="본인만 댓글을 수정할 수 있습니다.")
+
+        # 댓글 업데이트
+        update_query = "UPDATE comments SET comment = %s WHERE id = %s"
+        cursor.execute(update_query, (request.comment, comment_id))
+        connection.commit()
+
+        # 수정된 댓글 가져오기
+        cursor.execute("SELECT * FROM comments WHERE id = %s", (comment_id,))
+        updated_comment = cursor.fetchone()
+
+        # ✅ WebSocket을 통해 수정된 댓글 알림
+        await notify_updated_comment(updated_comment)
+
+        return {"message": "댓글이 수정되었습니다."}
+    finally:
+        cursor.close()
+        connection.close()
+
+# ✅ 7-2. 댓글 삭제
+@router.delete("/{post_id}/comment/{comment_id}")
+async def delete_comment(post_id: int, comment_id: int, user: dict = Depends(get_authenticated_user)):
+    """ 댓글 삭제 """
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # 댓글 존재 확인
+        cursor.execute("SELECT * FROM comments WHERE post_id = %s AND id = %s", (post_id, comment_id))
+        existing_comment = cursor.fetchone()
+        if not existing_comment:
+            raise HTTPException(status_code=404, detail="댓글을 찾을 수 없습니다.")
+
+        # 댓글 작성자 확인 (본인만 삭제 가능)
+        if existing_comment[2] != user["sub"]:  # `user_email` 필드가 2번째 인덱스라고 가정
+            raise HTTPException(status_code=403, detail="본인만 댓글을 삭제할 수 있습니다.")
+
+        # 댓글 삭제
+        delete_query = "DELETE FROM comments WHERE id = %s"
+        cursor.execute(delete_query, (comment_id,))
+        connection.commit()
+
+        # ✅ WebSocket을 통해 삭제된 댓글 알림
+        await notify_deleted_comment({"post_id": post_id, "comment_id": comment_id})
+
+        return {"message": "댓글이 삭제되었습니다."}
+    finally:
+        cursor.close()
+        connection.close()
 
 # ✅ 8. 관리자 답변 작성
 @router.post("/{post_id}/answer")
-def add_answer(post_id: int, request: AnswerRequest,
-    user: dict = Depends(get_authenticated_user)):
+def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_authenticated_user)):
   """관리자 답변 """
   if not user.get("admin"):
     raise HTTPException(status_code=403, detail="관리자만 답변을 작성할 수 있습니다.")
@@ -339,72 +390,65 @@ def add_answer(post_id: int, request: AnswerRequest,
 
 # ✅ 파일 업로드 - 게시글 작성 혹은 수정 중에만
 @router.post("/{post_id}/upload")
-async def upload_file(post_id: int, file: UploadFile = File(...),
-    user: dict = Depends(verify_token)):
+async def upload_file(
+    post_id: int,
+    file: Optional[UploadFile] = File(None),
+    user: dict = Depends(get_authenticated_user)):
+  """파일 업로드"""
+  if file is None:
+    raise HTTPException(status_code=400, detail="파일이 제공되지 않았습니다.")
+
+  connection = get_connection()
+  cursor = None  # cursor를 None으로 초기화
+
   try:
-    # 1) 파일 크기 검사(10MB 이하)
+    # 1️⃣ **파일 크기 검사 (10MB 제한)**
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-    content = await file.read()
+    content = await file.read()  # 🔥 비동기적으로 파일 읽기
     file_size = len(content)
     if file_size > MAX_FILE_SIZE:
-      raise HTTPException(status_code=400, detail="파일의 최대 크기는 10MB입니다")
+      raise HTTPException(status_code=400, detail="파일의 최대 크기는 10MB입니다.")
 
-    # 2) 파일 확장자 검사 (선택적으로 가능)
-    #    예: 이미지 파일만 허용한다고 했을 때
+    # 2️⃣ **파일 확장자 검사 (허용된 확장자 목록)**
     ext = file.filename.rsplit('.', 1)[-1].lower()
-    if ext not in ["png", "jpg", "jpeg", "gif"]:
-      raise HTTPException(status_code=400, detail="허용되지 않은 확장자입니다")
+    allowed_extensions = ["png", "jpg", "jpeg", "gif"]
+    if ext not in allowed_extensions:
+      raise HTTPException(status_code=400, detail="허용되지 않은 확장자입니다.")
 
-    # 3) MIME 타입 검사 (python-magic 등 활용 - 선택)
-    #    임시 파일에 저장 후 magic으로 검사
-    temp_filename = f"{uuid.uuid4()}"
-    temp_file_path = os.path.join(UPLOAD_FOLDER, temp_filename)
+    # 3️⃣ **MIME 타입 검사 (`python-magic` 활용)**
+    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
 
-    # 파일 저장(비동기 모드이므로 async write 사용)
-    with open(temp_file_path, "wb") as buffer:
-      content = await file.read()
-      buffer.write(content)
+    with open(file_path, "wb") as f:
+      f.write(content)  # 🔥 content를 한 번만 사용 (파일 저장)
 
-    # MIME 타입 검사
-    mime = magic.from_file(temp_file_path, mime=True)
-    print("Detected MIME:", mime)
+    mime = magic.Magic(mime=True)
+    detected_mime = mime.from_file(file_path)
+    print(f"Detected MIME Type: {detected_mime}")
 
-    # 이미지 MIME인지 확인
-    if not mime.startswith("image/"):
-      raise HTTPException(status_code=400, detail="허용되지 않은 파일 형식입니다")
+    if not detected_mime.startswith("image/"):
+      os.remove(file_path)  # 🔥 MIME 타입이 이미지가 아닐 경우 파일 삭제
+      raise HTTPException(status_code=400, detail="허용되지 않은 파일 형식입니다.")
 
-    # 4) ClamAV 검사
-    is_clean = scan_file_with_clamav(temp_file_path)
-    if not is_clean:
-      # 감염되었거나 오류 => 파일 삭제 후 에러 반환
-      if os.path.exists(temp_file_path):
-        os.remove(temp_file_path)
-        raise HTTPException(status_code=400, detail="파일이 감염되었거나 오류가 발생했습니다")
-
-    # Construct file path
-    file_location = os.path.join(UPLOAD_FOLDER, file.filename)
-
-    # Save file to disk
-    with open(file_location, "wb") as f:
-      f.write(file.file.read())
-
-    # Save file metadata to DB
-    connection = get_connection()
+    # 4️⃣ **데이터베이스에 파일 정보 저장**
     cursor = connection.cursor()
-
     query = """
-        INSERT INTO file_metadata (post_id, file_name, file_path, file_size, file_type, user_email, upload_time)
-        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            INSERT INTO file_metadata (post_id, file_name, file_path, file_size, file_type, user_email, upload_time)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
         """
     cursor.execute(query, (
-      post_id, file.filename, file_location, file_size, file.content_type,
-      user["sub"]))
+    post_id, file.filename, file_path, file_size, detected_mime, user["sub"]))
     connection.commit()
 
-    return {"message": "File uploaded successfully", "file_name": file.filename}
+    return {"message": "파일 업로드 성공", "file_name": file.filename}
+
+  except Exception as e:
+    raise HTTPException(status_code=500, detail=str(e))
+
   finally:
-    cursor.close()
-    connection.close()
+    # 5️⃣ **커서 및 DB 연결 닫기**
+    if cursor:
+      cursor.close()
+      connection.close()
 
 
 # ✅ 게시글의 파일 목록 가져오기  

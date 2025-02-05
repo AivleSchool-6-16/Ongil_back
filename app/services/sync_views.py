@@ -2,6 +2,7 @@ import redis
 from app.database.mysql_connect import get_connection
 
 def sync_redis_to_mysql():
+    """"""
     connection = get_connection()
     cursor = connection.cursor()
 
