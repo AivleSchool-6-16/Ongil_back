@@ -293,7 +293,7 @@ def refresh_token(refresh_token: str):
   # 새 토큰 발급
   new_access_token = create_access_token(
       data={"sub": email, "admin": is_admin_user},
-      expires_delta=timedelta(minutes=15)
+      expires_delta=timedelta(hours=12)
   )
 
   return {
