@@ -253,7 +253,7 @@ def login_user(request: LoginRequest):
         raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
 
     is_admin_user = is_admin(request.email)
-    access_token = create_access_token(data={"sub": request.email, "admin": is_admin_user}, expires_delta=timedelta(minutes=30))
+    access_token = create_access_token(data={"sub": request.email, "admin": is_admin_user}, expires_delta=timedelta(hours=12))
     refresh_token = create_refresh_token(data={"sub": request.email}, expires_delta=timedelta(days=7))
 
     return {

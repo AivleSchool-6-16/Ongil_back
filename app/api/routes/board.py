@@ -68,7 +68,6 @@ class PostCreateRequest(BaseModel):
   post_category: str
   post_text: str
 
-
 # 게시글 수정 요청 모델
 class PostUpdateRequest(BaseModel):
   post_title: Optional[str] = None
@@ -147,26 +146,79 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user),
 
 # ✅ 3. 게시글 작성
 @router.post("/")
-async def create_post(request: PostCreateRequest, user: dict = Depends(get_authenticated_user)):
-    """게시글 작성 """
+async def create_post_with_file(
+    request: PostCreateRequest = Depends(),
+    file: Optional[UploadFile] = File(None),
+    user: dict = Depends(get_authenticated_user)
+):
+    """게시글 작성 + 파일 업로드"""
+    connection = get_connection()
+    cursor = None
+
     try:
-        connection = get_connection()
         cursor = connection.cursor()
 
+        # ✅ 1️⃣ 게시글 먼저 DB에 저장
         query = """
             INSERT INTO Posts (board_id, user_email, post_title, post_category, post_text, post_time, views)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """
-        cursor.execute(query, (
-            request.board_id, user["sub"], request.post_title, request.post_category,
-            request.post_text, datetime.now(), 0))
+        """
+        cursor.execute(query, (request.board_id, user["sub"], request.post_title, request.post_category, request.post_text, datetime.now(), 0))
         connection.commit()
 
-        # 생성된 게시글 가져오기
-        cursor.execute("SELECT * FROM Posts WHERE post_id = LAST_INSERT_ID()")
+        # ✅ 2️⃣ 방금 저장한 `post_id` 가져오기
+        cursor.execute("SELECT LAST_INSERT_ID()")
+        post_id = cursor.fetchone()[0]
+
+        # ✅ 3️⃣ 파일이 있을 경우 처리
+        uploaded_file_data = None  # 업로드된 파일 정보 저장용
+
+        if file:
+            # 🔹 파일 크기 검사 (10MB 제한)
+            MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+            content = await file.read()  # 🔥 비동기적으로 파일 읽기
+            file_size = len(content)
+            if file_size > MAX_FILE_SIZE:
+                raise HTTPException(status_code=400, detail="파일의 최대 크기는 10MB입니다.")
+
+            # 🔹 확장자 검사 (허용된 확장자 목록)
+            ext = file.filename.rsplit('.', 1)[-1].lower()
+            allowed_extensions = ["png", "jpg", "jpeg", "gif"]
+            if ext not in allowed_extensions:
+                raise HTTPException(status_code=400, detail="허용되지 않은 확장자입니다.")
+
+            # 🔹 MIME 타입 검사 (`python-magic` 활용)
+            file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+            with open(file_path, "wb") as f:
+                f.write(content)  # 🔥 content를 한 번만 사용 (파일 저장)
+
+            mime = magic.Magic(mime=True)
+            detected_mime = mime.from_file(file_path)
+
+            if not detected_mime.startswith("image/"):
+                os.remove(file_path)  # 🔥 MIME 타입이 이미지가 아닐 경우 파일 삭제
+                raise HTTPException(status_code=400, detail="허용되지 않은 파일 형식입니다.")
+
+            # 🔹 파일 정보를 DB에 저장
+            file_query = """
+                INSERT INTO file_metadata (post_id, file_name, file_path, file_size, file_type, user_email, upload_time)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            """
+            cursor.execute(file_query, (post_id, file.filename, file_path, file_size, detected_mime, user["sub"]))
+            connection.commit()
+
+            uploaded_file_data = {
+                "file_name": file.filename,
+                "file_path": file_path,
+                "file_size": file_size,
+                "file_type": detected_mime
+            }
+
+        # ✅ 4️⃣ 생성된 게시글 데이터 가져오기
+        cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
         new_post = cursor.fetchone()
 
-        # WebSocket을 통해 새 게시글 알림 (JSON 변환)
+        # ✅ 5️⃣ WebSocket을 통해 새 게시글 알림 (파일 정보 포함)
         post_data = {
             "post_id": new_post[0],
             "board_id": new_post[1],
@@ -175,14 +227,20 @@ async def create_post(request: PostCreateRequest, user: dict = Depends(get_authe
             "post_category": new_post[4],
             "post_text": new_post[5],
             "post_time": new_post[6].isoformat(),
-            "views": new_post[7]
+            "views": new_post[7],
+            "file": uploaded_file_data  # 업로드된 파일 정보 추가
         }
-        await notify_new_post(post_data)  # WebSocket 이벤트 전송
+        await notify_new_post(post_data)
 
-        return {"message": "게시글이 등록되었습니다."}
+        return {"message": "게시글이 등록되었습니다.", "post_id": post_id, "file": uploaded_file_data}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     finally:
-        cursor.close()
-        connection.close()
+        if cursor:
+            cursor.close()
+            connection.close()
 
 
 # ✅ 4. 게시글 수정
@@ -303,39 +361,39 @@ async def add_comment(post_id: int, request: CommentRequest,
     connection.close()
     
 # ✅ 7-1. 댓글 수정
-@router.put("/{post_id}/comment/{comment_id}")
-async def update_comment(post_id: int, comment_id: int, request: CommentRequest, user: dict = Depends(get_authenticated_user)):
-    """ 댓글 수정 """
-    try:
-        connection = get_connection()
-        cursor = connection.cursor()
+# @router.put("/{post_id}/comment/{comment_id}")
+# async def update_comment(post_id: int, comment_id: int, request: CommentRequest, user: dict = Depends(get_authenticated_user)):
+#     """ 댓글 수정 """
+#     try:
+#         connection = get_connection()
+#         cursor = connection.cursor()
 
-        # 댓글 존재 확인
-        cursor.execute("SELECT * FROM comments WHERE post_id = %s AND id = %s", (post_id, comment_id))
-        existing_comment = cursor.fetchone()
-        if not existing_comment:
-            raise HTTPException(status_code=404, detail="댓글을 찾을 수 없습니다.")
+#         # 댓글 존재 확인
+#         cursor.execute("SELECT * FROM comments WHERE post_id = %s AND id = %s", (post_id, comment_id))
+#         existing_comment = cursor.fetchone()
+#         if not existing_comment:
+#             raise HTTPException(status_code=404, detail="댓글을 찾을 수 없습니다.")
 
-        # 댓글 작성자 확인 (자신의 댓글만 수정 가능)
-        if existing_comment[2] != user["sub"]:  # `user_email` 필드가 2번째 인덱스라고 가정
-            raise HTTPException(status_code=403, detail="본인만 댓글을 수정할 수 있습니다.")
+#         # 댓글 작성자 확인 (자신의 댓글만 수정 가능)
+#         if existing_comment[2] != user["sub"]:  # `user_email` 필드가 2번째 인덱스라고 가정
+#             raise HTTPException(status_code=403, detail="본인만 댓글을 수정할 수 있습니다.")
 
-        # 댓글 업데이트
-        update_query = "UPDATE comments SET comment = %s WHERE id = %s"
-        cursor.execute(update_query, (request.comment, comment_id))
-        connection.commit()
+#         # 댓글 업데이트
+#         update_query = "UPDATE comments SET comment = %s WHERE id = %s"
+#         cursor.execute(update_query, (request.comment, comment_id))
+#         connection.commit()
 
-        # 수정된 댓글 가져오기
-        cursor.execute("SELECT * FROM comments WHERE id = %s", (comment_id,))
-        updated_comment = cursor.fetchone()
+#         # 수정된 댓글 가져오기
+#         cursor.execute("SELECT * FROM comments WHERE id = %s", (comment_id,))
+#         updated_comment = cursor.fetchone()
 
-        # ✅ WebSocket을 통해 수정된 댓글 알림
-        await notify_updated_comment(updated_comment)
+#         # ✅ WebSocket을 통해 수정된 댓글 알림
+#         await notify_updated_comment(updated_comment)
 
-        return {"message": "댓글이 수정되었습니다."}
-    finally:
-        cursor.close()
-        connection.close()
+#         return {"message": "댓글이 수정되었습니다."}
+#     finally:
+#         cursor.close()
+#         connection.close()
 
 # ✅ 7-2. 댓글 삭제
 @router.delete("/{post_id}/comment/{comment_id}")
@@ -387,6 +445,36 @@ def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_au
   finally:
     cursor.close()
     connection.close()
+    
+# ✅ 8-1. 관리자 답변 삭제     
+@router.delete("/{post_id}/answer/{answer_id}")
+async def delete_answer(post_id: int, answer_id: int, user: dict = Depends(get_authenticated_user)):
+    """ 관리자 답변 삭제 """
+    if not user.get("admin"):  # 관리자 여부 확인
+        raise HTTPException(status_code=403, detail="관리자만 답변을 삭제할 수 있습니다.")
+
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # 답변 존재 여부 확인
+        cursor.execute("SELECT * FROM answer WHERE post_id = %s AND id = %s", (post_id, answer_id))
+        existing_answer = cursor.fetchone()
+        if not existing_answer:
+            raise HTTPException(status_code=404, detail="답변을 찾을 수 없습니다.")
+
+        # 답변 삭제
+        delete_query = "DELETE FROM answer WHERE id = %s"
+        cursor.execute(delete_query, (answer_id,))
+        connection.commit()
+
+        # WebSocket을 통해 삭제된 답변 알림
+        await notify_deleted_answer({"post_id": post_id, "answer_id": answer_id})
+
+        return {"message": "관리자 답변이 삭제되었습니다."}
+    finally:
+        cursor.close()
+        connection.close()
 
 
 # ✅ 파일 업로드 - 게시글 작성 혹은 수정 중에만
@@ -455,7 +543,7 @@ async def upload_file(
 # ✅ 게시글의 파일 목록 가져오기  
 @router.get("/{post_id}/files")
 def get_post_files(post_id: int):
-  """파일 목록 - 확인용 api """
+  """파일 목록 - 게시물 조회, 게시글 수정에 연결 """
   try:
     connection = get_connection()
     cursor = connection.cursor(dictionary=True)

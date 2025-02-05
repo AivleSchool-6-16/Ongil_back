@@ -73,7 +73,7 @@ async def message(sid, data):
 
 # WebSocket을 통한 실시간 게시글 업데이트
 async def notify_new_post(post):
-    """ 새로운 게시글을 WebSocket을 통해 모든 클라이언트에게 전송 """
+    """ 새로운 게시글을 WebSocket으로 전송 """
     print(f"📢 [Socket.IO] 새로운 게시글: {post}")
     await sio.emit("newPost", post)
 
@@ -90,10 +90,15 @@ async def notify_new_comment(comment):
     
 async def notify_updated_comment(comment):
     """ 댓글 수정 시 모든 클라이언트에 실시간 알림 """
-    print(f"✏️ [Socket.IO] 댓글 수정됨: {comment}")
+    print(f"📢 [Socket.IO] 댓글 수정됨: {comment}")
     await sio.emit("updatedComment", comment)
 
 async def notify_deleted_comment(data):
     """ 댓글 삭제 시 모든 클라이언트에 실시간 알림 """
-    print(f"🗑️ [Socket.IO] 댓글 삭제됨: {data}")
+    print(f"📢 [Socket.IO] 댓글 삭제됨: {data}")
     await sio.emit("deletedComment", data)
+    
+async def notify_deleted_answer(data):
+    """ 관리자 답변 삭제 시 모든 클라이언트에게 실시간 알림 """
+    print(f"📢 [Socket.IO] 관리자 답변 삭제됨: {data}")
+    await sio.emit("deletedAnswer", data)
