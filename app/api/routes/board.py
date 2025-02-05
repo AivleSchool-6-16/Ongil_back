@@ -277,8 +277,9 @@ def search_posts(text: Optional[str] = Query(None),author: Optional[str] = Query
 
 # ✅ 7. 댓글 작성
 @router.post("/{post_id}/comment")
-async def add_comment(post_id: int, request: CommentRequest, user: dict = Depends(get_authenticated_user)):
-  """일반 댓글 작성 """
+async def add_comment(post_id: int, request: CommentRequest,
+    user: dict = Depends(get_authenticated_user)):
+  """일반 댓글 작성"""
   try:
     connection = get_connection()
     cursor = connection.cursor()
