@@ -482,30 +482,34 @@ def search_posts(title: Optional[str] = Query(None), text: Optional[str] = Query
 
 # ✅ 7. 댓글 작성
 @router.post("/{post_id}/comment")
-async def add_comment(post_id: int, request: CommentRequest,
-    user: dict = Depends(get_authenticated_user)):
-  """일반 댓글 작성"""
-  try:
-    connection = get_connection()
-    cursor = connection.cursor()
+async def add_comment(post_id: int,request: CommentRequest,user: dict = Depends(get_authenticated_user)):
+    """일반 댓글 작성"""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True) 
 
-    query = "INSERT INTO comments (post_id, user_email, comment, comment_date) VALUES (%s, %s, %s, NOW())"
-    cursor.execute(query, (post_id, user["sub"], request.comment))
-    connection.commit()
+        # 댓글 삽입
+        query = "INSERT INTO comments (post_id, user_email, comment, comment_date) VALUES (%s, %s, %s, NOW())"
+        cursor.execute(query, (post_id, user["sub"], request.comment))
+        connection.commit()
 
-    # 생성된 댓글 가져오기
-    cursor.execute(
-        "SELECT * FROM comments WHERE post_id = %s ORDER BY comment_date DESC LIMIT 1",
-        (post_id,))
-    new_comment = cursor.fetchone()
+        # 생성된 댓글 가져오기
+        cursor.execute(
+            "SELECT * FROM comments WHERE post_id = %s ORDER BY comment_date DESC LIMIT 1",
+            (post_id,))
+        new_comment = cursor.fetchone()
 
-    # WebSocket을 통해 댓글 추가 알림
-    await notify_new_comment(new_comment)
+        # 🔹 datetime 변환 (comment_date)
+        if new_comment and "comment_date" in new_comment:
+            new_comment["comment_date"] = new_comment["comment_date"].isoformat()
 
-    return {"message": "댓글이 등록되었습니다."}
-  finally:
-    cursor.close()
-    connection.close()
+        # WebSocket 전송
+        await notify_new_comment(new_comment)
+
+        return {"message": "댓글이 등록되었습니다.", "comment": new_comment}
+    finally:
+        cursor.close()
+        connection.close()
 
 # ✅ 7-1. 댓글 삭제
 @router.delete("/{post_id}/comment/{comment_id}")
@@ -530,7 +534,7 @@ async def delete_comment(post_id: int, comment_id: int, user: dict = Depends(get
         cursor.execute(delete_query, (comment_id,))
         connection.commit()
 
-        # ✅ WebSocket을 통해 삭제된 댓글 알림
+        # WebSocket을 통해 삭제된 댓글 알림
         await notify_deleted_comment({"post_id": post_id, "comment_id": comment_id})
 
         return {"message": "댓글이 삭제되었습니다."}
@@ -540,23 +544,34 @@ async def delete_comment(post_id: int, comment_id: int, user: dict = Depends(get
 
 # ✅ 8. 관리자 답변 작성
 @router.post("/{post_id}/answer")
-def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_authenticated_user)):
-  """관리자 답변 """
-  if not user.get("admin"):
-    raise HTTPException(status_code=403, detail="관리자만 답변을 작성할 수 있습니다.")
+async def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_authenticated_user)):
+    """관리자 답변 """
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)  # ✅ dictionary=True 추가
 
-  try:
-    connection = get_connection()
-    cursor = connection.cursor()
+        # 답변 삽입
+        query = "INSERT INTO answer (post_id, user_email, ans_text, ans_date) VALUES (%s, %s, %s, NOW())"
+        cursor.execute(query, (post_id, user["sub"], request.answer))
+        connection.commit()
 
-    query = "INSERT INTO answer (post_id, user_email, ans_text, ans_date) VALUES (%s, %s, %s, NOW())"
-    cursor.execute(query, (post_id, user["sub"], request.answer))
-    connection.commit()
+        # ✅ 생성된 답변 가져오기
+        cursor.execute(
+            "SELECT * FROM answer WHERE post_id = %s ORDER BY ans_date DESC LIMIT 1",
+            (post_id,))
+        new_answer = cursor.fetchone()
 
-    return {"message": "관리자 답변이 등록되었습니다."}
-  finally:
-    cursor.close()
-    connection.close()
+        # 🔹 datetime 변환 (ans_date)
+        if new_answer and "ans_date" in new_answer:
+            new_answer["ans_date"] = new_answer["ans_date"].isoformat()
+
+        # ✅ WebSocket 전송
+        await notify_new_answer(new_answer)
+
+        return {"message": "관리자 답변이 등록되었습니다.", "answer": new_answer}
+    finally:
+        cursor.close()
+        connection.close()
     
 # ✅ 8-1. 관리자 답변 삭제     
 @router.delete("/{post_id}/answer/{answer_id}")
