@@ -1,6 +1,6 @@
 # 문의 게시판
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
-from fastapi import File, Form, UploadFile
+from fastapi import File, Form, Body, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -160,8 +160,11 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user),backgrou
 # ✅ 3. 게시글 작성
 @router.post("/")
 async def create_post_with_file(
-    request: PostCreateRequest = Depends(),
-    files: Optional[List[UploadFile]] = File(None),  # 여러 파일을 받도록 변경
+    board_id: int = Form(...),
+    post_title: str = Form(...),
+    post_category: str = Form(...),
+    post_text: str = Form(...),
+    files: Optional[List[UploadFile]] = File(None),
     user: dict = Depends(get_authenticated_user)
 ):
     """게시글 작성 + 파일 업로드"""
@@ -177,16 +180,7 @@ async def create_post_with_file(
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         cursor.execute(
-            query,
-            (
-                request.board_id,
-                user["sub"],
-                request.post_title,
-                request.post_category,
-                request.post_text,
-                datetime.now(),
-                0,
-            )
+            query,(board_id,user["sub"],post_title,post_category,post_text,datetime.now(),0,)
         )
         connection.commit()
 
@@ -194,39 +188,34 @@ async def create_post_with_file(
         cursor.execute("SELECT LAST_INSERT_ID()")
         post_id = cursor.fetchone()[0]
 
-        # 3. 파일이 있을 경우 처리 (파일은 여러 개일 수 있음)
-        uploaded_files_data = []  # 업로드된 파일 정보를 저장할 리스트
-
+        # 3. 파일이 있을 경우 처리
+        uploaded_files_data = []
         if files:
             MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
             allowed_extensions = ["png", "jpg", "jpeg", "gif"]
 
             for file in files:
-                content = await file.read()  # 파일 내용을 비동기적으로 읽기
+                content = await file.read()
                 file_size = len(content)
                 if file_size > MAX_FILE_SIZE:
                     raise HTTPException(status_code=400, detail=f"파일 {file.filename}의 최대 크기는 10MB입니다.")
 
-                # 확장자 검사
                 if '.' not in file.filename:
                     raise HTTPException(status_code=400, detail=f"파일 {file.filename}에 확장자가 없습니다.")
                 ext = file.filename.rsplit('.', 1)[-1].lower()
                 if ext not in allowed_extensions:
                     raise HTTPException(status_code=400, detail=f"파일 {file.filename}: 허용되지 않은 확장자입니다.")
 
-                # 파일 저장
                 file_path = os.path.join(UPLOAD_FOLDER, file.filename)
                 with open(file_path, "wb") as f:
                     f.write(content)
 
-                # MIME 타입 검사 (python-magic 사용)
                 mime = magic.Magic(mime=True)
                 detected_mime = mime.from_file(file_path)
                 if not detected_mime.startswith("image/"):
-                    os.remove(file_path)  # 이미지가 아니면 파일 삭제
+                    os.remove(file_path)
                     raise HTTPException(status_code=400, detail=f"파일 {file.filename}: 허용되지 않은 파일 형식입니다.")
 
-                # 파일 정보를 DB에 저장
                 file_query = """
                     INSERT INTO file_metadata (post_id, file_name, file_path, file_size, file_type, user_email, upload_time)
                     VALUES (%s, %s, %s, %s, %s, %s, NOW())
@@ -258,7 +247,7 @@ async def create_post_with_file(
             "post_text": new_post[5],
             "post_time": new_post[6].isoformat(),
             "views": new_post[7],
-            "files": uploaded_files_data  # 업로드된 파일 정보를 리스트로 추가
+            "files": uploaded_files_data
         }
         await notify_new_post(post_data)
 
@@ -271,7 +260,6 @@ async def create_post_with_file(
         if cursor:
             cursor.close()
             connection.close()
-
 
 # ✅ 4. 게시글 수정 권한 확인 
 @router.get("/{post_id}/edit")
@@ -306,86 +294,70 @@ async def get_post_for_edit(post_id: int, user: dict = Depends(get_authenticated
 @router.put("/{post_id}")
 async def update_post(
     post_id: int,
-    post_title: Optional[str] = Form(None),
-    post_category: Optional[str] = Form(None),
-    post_text: Optional[str] = Form(None),
-    delete_files: Optional[List[int]] = Form(None),
-    files: Optional[List[UploadFile]] = File(None),
+    post_title: str = Form(...),
+    post_category: str = Form(...),
+    post_text: str = Form(...),
+    files: Optional[List[UploadFile]] = File(None),  # 업데이트할 파일 리스트
     user: dict = Depends(get_authenticated_user)
 ):
-    """게시글 및 파일 수정"""
+    """게시글 수정 + 기존 파일 삭제 후 새 파일 저장"""
     connection = get_connection()
     cursor = None
 
     try:
         cursor = connection.cursor(dictionary=True)
 
-        # ✅ 1️⃣ 권한 확인 (본인 or 관리자만 가능)
-        cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
-        post = cursor.fetchone()
-
-        if not post or (post["user_email"] != user["sub"] and not user.get("admin")):
-            raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
-
-        # ✅ 2️⃣ 기존 값 유지하며 게시글 수정
+        # 1️. 게시글 내용 수정
         update_query = """
             UPDATE Posts
-            SET 
-                post_title = COALESCE(%s, post_title), 
-                post_category = COALESCE(%s, post_category), 
-                post_text = COALESCE(%s, post_text)
+            SET post_title = %s, post_category = %s, post_text = %s, post_time = %s
             WHERE post_id = %s
         """
-        cursor.execute(update_query, (
-            post_title, post_category, post_text, post_id
-        ))
+        cursor.execute(update_query, (post_title, post_category, post_text, datetime.now(), post_id))
         connection.commit()
 
-        # ✅ 3️⃣ 파일 삭제 처리 (삭제할 파일 ID 리스트 확인)
-        if delete_files:
-            delete_file_ids = delete_files if isinstance(delete_files, list) else [int(delete_files)]
-            for file_id in delete_file_ids:
-                cursor.execute("SELECT file_path FROM file_metadata WHERE file_id = %s", (file_id,))
-                file_entry = cursor.fetchone()
-                if file_entry:
-                    file_path = file_entry["file_path"]
-                    if os.path.exists(file_path):
-                        os.remove(file_path)  # 실제 파일 삭제
-                    cursor.execute("DELETE FROM file_metadata WHERE file_id = %s", (file_id,))  # DB에서 삭제
+        # 2️. 기존 파일 삭제 (post_id에 속한 모든 파일 삭제)
+        cursor.execute("SELECT file_id, file_path FROM file_metadata WHERE post_id = %s", (post_id,))
+        existing_files = cursor.fetchall()
+
+        for file in existing_files:
+            # 실제 파일 삭제
+            if os.path.exists(file["file_path"]):
+                os.remove(file["file_path"])
+
+            # DB에서 파일 메타데이터 삭제
+            cursor.execute("DELETE FROM file_metadata WHERE file_id = %s", (file["file_id"],))
             connection.commit()
 
-        # ✅ 4️⃣ 새로운 파일 업로드 처리
-        uploaded_files = []  # 업로드된 파일 정보 저장
-
+        # 3️. 파일 추가 (새 파일 업로드)
+        uploaded_files_data = []
         if files:
+            MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+            allowed_extensions = ["png", "jpg", "jpeg", "gif"]
+
             for file in files:
-                content = await file.read()  # 🔥 파일 비동기 읽기
+                content = await file.read()
                 file_size = len(content)
-
-                # 🔹 파일 크기 검사 (10MB 제한)
-                MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
                 if file_size > MAX_FILE_SIZE:
-                    raise HTTPException(status_code=400, detail="파일의 최대 크기는 10MB입니다.")
+                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}의 최대 크기는 10MB입니다.")
 
-                # 🔹 확장자 검사
+                if '.' not in file.filename:
+                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}에 확장자가 없습니다.")
                 ext = file.filename.rsplit('.', 1)[-1].lower()
-                allowed_extensions = ["png", "jpg", "jpeg", "gif"]
                 if ext not in allowed_extensions:
-                    raise HTTPException(status_code=400, detail="허용되지 않은 확장자입니다.")
+                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}: 허용되지 않은 확장자입니다.")
 
-                # 🔹 MIME 타입 검사
                 file_path = os.path.join(UPLOAD_FOLDER, file.filename)
                 with open(file_path, "wb") as f:
                     f.write(content)
 
                 mime = magic.Magic(mime=True)
                 detected_mime = mime.from_file(file_path)
-
                 if not detected_mime.startswith("image/"):
-                    os.remove(file_path)  # MIME 타입이 이미지가 아닐 경우 파일 삭제
-                    raise HTTPException(status_code=400, detail="허용되지 않은 파일 형식입니다.")
+                    os.remove(file_path)
+                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}: 허용되지 않은 파일 형식입니다.")
 
-                # 🔹 DB에 파일 정보 저장
+                # DB에 새 파일 정보 저장
                 file_query = """
                     INSERT INTO file_metadata (post_id, file_name, file_path, file_size, file_type, user_email, upload_time)
                     VALUES (%s, %s, %s, %s, %s, %s, NOW())
@@ -393,32 +365,36 @@ async def update_post(
                 cursor.execute(file_query, (post_id, file.filename, file_path, file_size, detected_mime, user["sub"]))
                 connection.commit()
 
-                uploaded_files.append({
+                uploaded_files_data.append({
                     "file_name": file.filename,
                     "file_path": file_path,
                     "file_size": file_size,
                     "file_type": detected_mime
                 })
 
-        # ✅ 5️⃣ 수정된 게시글 정보 가져오기
+        # 4️. 수정된 게시글 데이터 조회
         cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
         updated_post = cursor.fetchone()
 
-        # ✅ 6️⃣ WebSocket을 통해 수정된 게시글 알림
-        post_data = {
-            "post_id": updated_post["post_id"],
-            "board_id": updated_post["board_id"],
-            "user_email": updated_post["user_email"],
-            "post_title": updated_post["post_title"],
-            "post_category": updated_post["post_category"],
-            "post_text": updated_post["post_text"],
-            "post_time": updated_post["post_time"].isoformat(),
-            "views": updated_post["views"],
-            "files": uploaded_files  # 새로 추가된 파일 정보 포함
-        }
-        await notify_updated_post(post_data)
+        # 5️. 수정된 파일 목록 가져오기
+        cursor.execute("""
+            SELECT file_id, file_name, file_path, file_size, file_type, upload_time
+            FROM file_metadata WHERE post_id = %s
+        """, (post_id,))
+        updated_files = cursor.fetchall()
 
-        return {"message": "게시글이 수정되었습니다.", "updated_files": uploaded_files}
+        # WebSocket을 통해 수정된 게시글 정보 전송
+        update_data = {
+            "updated_post": updated_post,
+            "files": updated_files 
+        }
+        await notify_updated_post(update_data)
+
+        return {
+            "message": "게시글이 수정되었습니다.",
+            "post": updated_post,
+            "files": updated_files
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -427,6 +403,7 @@ async def update_post(
         if cursor:
             cursor.close()
             connection.close()
+
 
 # ✅ 5. 게시글 삭제
 @router.delete("/{post_id}")
@@ -467,7 +444,7 @@ def search_posts(title: Optional[str] = Query(None), text: Optional[str] = Query
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # ✅ `user_data` 조인하여 `user_dept`, `jurisdiction` 가져오기
+        # `user_data` 조인하여 `user_dept`, `jurisdiction` 가져오기
         query = """
             SELECT p.post_id, p.board_id, p.user_email, u.user_dept, u.jurisdiction, 
                    p.post_title, p.post_category, p.post_time, p.views
@@ -542,8 +519,8 @@ async def delete_comment(post_id: int, comment_id: int, user: dict = Depends(get
             raise HTTPException(status_code=404, detail="댓글을 찾을 수 없습니다.")
 
         # 댓글 작성자 확인 (본인만 삭제 가능)
-        if existing_comment[2] != user["sub"]:  # `user_email` 필드가 2번째 인덱스라고 가정
-            raise HTTPException(status_code=403, detail="본인만 댓글을 삭제할 수 있습니다.")
+        if existing_comment[2] != user["sub"] and not user.get("admin"):  # `user_email` 필드가 2번째 인덱스라고 가정
+            raise HTTPException(status_code=403, detail="본인 혹은 관리자만 댓글을 삭제할 수 있습니다.")
 
         # 댓글 삭제
         delete_query = "DELETE FROM comments WHERE comment_id = %s"
@@ -581,7 +558,7 @@ def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(get_au
 # ✅ 8-1. 관리자 답변 삭제     
 @router.delete("/{post_id}/answer/{answer_id}")
 async def delete_answer(post_id: int, answer_id: int, user: dict = Depends(get_authenticated_user)):
-    """ 관리자 답변 삭제 """
+    """ 관리자 답변 삭제 - 다른 관리자의 답변도 삭제 가능 """
     if not user.get("admin"):  # 관리자 여부 확인
         raise HTTPException(status_code=403, detail="관리자만 답변을 삭제할 수 있습니다.")
 
@@ -608,6 +585,8 @@ async def delete_answer(post_id: int, answer_id: int, user: dict = Depends(get_a
         cursor.close()
         connection.close()
 
+
+# ✅ 9. 댓글&답변 가져오기 
 @router.get("/{post_id}/comments-answers")
 async def get_comments_and_answers(post_id: int):
     """게시글의 댓글 및 관리자 답변 조회"""
@@ -684,14 +663,13 @@ def get_post_files(post_id: int):
       if os.path.exists(file["file_path"]):
         valid_files.append(file)
       else:
-        # Remove missing file entry from DB
+        # vk
         delete_query = "DELETE FROM file_metadata WHERE file_id = %s"
         cursor.execute(delete_query, (file["file_id"],))
         connection.commit()
 
     if not valid_files:
-      raise HTTPException(status_code=404,
-                          detail="No files found for this post.")
+      raise HTTPException(status_code=404,detail="No files found for this post.")
 
     return {"files": valid_files}
   finally:
@@ -711,16 +689,15 @@ def download_file(file_id: int):
     file = cursor.fetchone()
 
     if not file:
-      raise HTTPException(status_code=404, detail="File metadata not found.")
+      raise HTTPException(status_code=404, detail="파일 업로드 기록이 없습니다.")
 
-    # Check if file exists
+    # 파일 존재 여부 
     if not os.path.exists(file["file_path"]):
-      # Delete the file entry from the database if missing
+      # 파일 메타 데이터가 없을 때, 실제 파일 삭제 
       delete_query = "DELETE FROM file_metadata WHERE file_id = %s"
       cursor.execute(delete_query, (file_id,))
       connection.commit()
-      raise HTTPException(status_code=404,
-                          detail="File not found on the server.")
+      raise HTTPException(status_code=404, detail="파일이 존재하지 않습니다.")
 
     return FileResponse(
         file["file_path"],
@@ -732,7 +709,7 @@ def download_file(file_id: int):
     connection.close()
 
 
-# ✅ 파일 삭제 - 게시글 작성 혹은 수정 중에만   
+# ✅ 파일 삭제   
 @router.delete("/files/{file_id}")
 def delete_file(file_id: int, user: dict = Depends(get_authenticated_user)):
   """파일 삭제 - 게시글 작성 혹은 수정 중에만 연결 가능 """

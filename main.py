@@ -56,13 +56,18 @@ app.mount("/socket.io", socket_app)
 
 # 입력형식 오류 handler
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request,
-    exc: RequestValidationError):
-  return JSONResponse(
-      status_code=400,
-      content={"detail": "입력 형식이 올바르지 않습니다."}
-  )
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    error_messages = [{"field": error["loc"], "message": error["msg"]} for error in errors]
 
+    return JSONResponse(
+        status_code=400,
+        content={
+            "detail": "입력 형식이 올바르지 않습니다.",
+            "errors": error_messages 
+        }
+    )
+    
 
 # ✅ 토큰 검사를 제외할 엔드포인트 목록
 EXCLUDED_PATHS = [
@@ -75,7 +80,7 @@ EXCLUDED_PATHS = [
   "/auth/signup/check-email",
   "/auth/signup/confirm",
   "/auth/signup/send-code",
-  "/board",
+  # "/board",
   "/socket.io",  # '/socket.io'로 시작하는 모든 경로를 제외
   # "/roads/"
 ]
