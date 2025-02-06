@@ -280,6 +280,7 @@ async def get_post_for_edit(post_id: int, user: dict = Depends(get_authenticated
 @router.put("/{post_id}")
 async def update_post(
     post_id: int,
+    board_id: int = Form(...),
     post_title: str = Form(...),
     post_category: str = Form(...),
     post_text: str = Form(...),
@@ -296,10 +297,10 @@ async def update_post(
         # 1️. 게시글 내용 수정
         update_query = """
             UPDATE Posts
-            SET post_title = %s, post_category = %s, post_text = %s, post_time = %s
+            SET board_id = %s, post_title = %s, post_category = %s, post_text = %s, post_time = %s
             WHERE post_id = %s
         """
-        cursor.execute(update_query, (post_title, post_category, post_text, datetime.now(), post_id))
+        cursor.execute(update_query, (board_id, post_title, post_category, post_text, datetime.now(), post_id))
         connection.commit()
 
         # 2️. 기존 파일 삭제 (post_id에 속한 모든 파일 삭제)
