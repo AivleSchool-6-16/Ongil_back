@@ -88,17 +88,17 @@ async def notify_new_comment(comment):
     print(f"📢 [Socket.IO] 새로운 댓글: {comment}")
     await sio.emit("newComment", comment)
     
-async def notify_updated_comment(comment):
-    """ 댓글 수정 시 모든 클라이언트에 실시간 알림 """
-    print(f"📢 [Socket.IO] 댓글 수정됨: {comment}")
-    await sio.emit("updatedComment", comment)
-
 async def notify_deleted_comment(data):
     """ 댓글 삭제 시 모든 클라이언트에 실시간 알림 """
     print(f"📢 [Socket.IO] 댓글 삭제됨: {data}")
     await sio.emit("deletedComment", data)
     
-async def notify_deleted_answer(data):
+async def notify_new_answer(answer):
+    """ 관리자 답글이 달렸을 때 WebSocket으로 전송 """
+    print(f"📢 [Socket.IO] 새로운 댓글: {answer}")
+    await sio.emit("newAnswer", answer)
+    
+async def notify_deleted_answer(answer):
     """ 관리자 답변 삭제 시 모든 클라이언트에게 실시간 알림 """
-    print(f"📢 [Socket.IO] 관리자 답변 삭제됨: {data}")
-    await sio.emit("deletedAnswer", data)
+    print(f"📢 [Socket.IO] 관리자 답변 삭제됨: {answer}")
+    await sio.emit("deletedAnswer", answer)

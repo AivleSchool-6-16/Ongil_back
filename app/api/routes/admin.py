@@ -28,7 +28,7 @@ def get_file_requests(token: str = Depends(get_authenticated_user)):
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # ✅ Retrieve file requests with user details
+        # file request 확인 
         query = """
         SELECT r.log_id, r.user_email, u.user_dept, u.jurisdiction, r.c_date
         FROM rec_road_log r
@@ -47,9 +47,7 @@ def get_file_requests(token: str = Depends(get_authenticated_user)):
 # ✅ 파일 승인 
 @router.post("/file-requests/approve/{log_id}")
 def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_user)):
-    """승인 메일, 확인 후 ask_check 0으로 변경\n
-    (혹은 로그 delete하기)
-    """
+    """승인 메일"""
     if not user.get("admin"):
         raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
 
@@ -57,7 +55,6 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # Get request details
         query = "SELECT user_email, recommended_roads FROM rec_road_log WHERE log_id = %s AND ask_check = 1"
         cursor.execute(query, (log_id,))
         request = cursor.fetchone()
@@ -68,7 +65,7 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
         user_email = request["user_email"]
         recommended_roads = json.loads(request["recommended_roads"])
 
-        # Generate CSV file
+        # csv 파일로 만들기 
         csv_filename = f"road_recommendations_{log_id}.csv"
         csv_filepath = f"./{csv_filename}"  # Temporary directory
 
@@ -81,17 +78,12 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
                     road["rd_slope"], road["acc_occ"], road["acc_sc"], road["pred_idx"]
                 ])
 
-        # Send email with CSV attachment
+        # 승인 메일 전송, csv 파일 첨부
         email_subject = "도로 추천 결과 파일"
         email_body = f"{user_email}님,\n\n도로 추천 결과 파일을 첨부합니다."
         send_file_email(to_email=user_email, subject=email_subject, body=email_body, attachment_path=csv_filepath)
 
-        # Reset `ask_check` to 0 instead of deleting (혹은 로그 delete하기)
-        update_query = "UPDATE rec_road_log SET ask_check = 0 WHERE log_id = %s"
-        cursor.execute(update_query, (log_id,))
-        connection.commit()
-
-        # Remove temporary file
+        # 파일 삭제 
         os.remove(csv_filepath)
 
         return {"message": f"파일이 {user_email}님에게 전송되었습니다."}
@@ -102,7 +94,7 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
 # ✅ 파일 거부
 @router.post("/file-requests/reject/{log_id}")
 def reject_file_request(log_id: int, user: dict = Depends(get_authenticated_user)):
-    """reject 메일, 확인 후 ask_check 0으로 변경"""
+    """reject 메일"""
     if not user.get("admin"):
         raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
 
@@ -119,15 +111,10 @@ def reject_file_request(log_id: int, user: dict = Depends(get_authenticated_user
 
         user_email = request["user_email"]
 
-        # Send rejection email
+        # 거부 메일 전송 
         email_subject = "파일 요청이 거부되었습니다."
         email_body = f"{user_email}님,\n\n요청하신 도로 추천 파일이 거부되었습니다. 추가 문의는 관리자에게 연락하세요."
         send_file_email(to_email=user_email, subject=email_subject, body=email_body)
-
-        # Reset `ask_check` to 0 instead of deleting
-        update_query = "UPDATE rec_road_log SET ask_check = 0 WHERE log_id = %s"
-        cursor.execute(update_query, (log_id,))
-        connection.commit()
 
         return {"message": f"파일 요청이 거부되었으며 {user_email}님에게 알림이 전송되었습니다."}
     finally:

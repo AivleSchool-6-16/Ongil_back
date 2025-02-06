@@ -19,7 +19,7 @@ except Exception as e:
   redis_client = None
 
 # User input model
-class UserInput(BaseModel):
+class UserWeight(BaseModel):
   region: str
   rd_slope_weight: float = 4.0
   acc_occ_weight: float = 3.0
@@ -38,8 +38,7 @@ def get_district(district: str, user: dict = Depends(get_authenticated_user)):
     result = cursor.fetchone()
 
     if result["count"] == 0:
-      raise HTTPException(status_code=404,
-                          detail=f"'{district}' 지역의 도로 정보가 없습니다.")
+      raise HTTPException(status_code=404, detail=f"'{district}' 지역의 도로 정보가 없습니다.")
 
     return {"message": f"'{district}' 지역이 선택되었습니다."}
   finally:
@@ -49,8 +48,7 @@ def get_district(district: str, user: dict = Depends(get_authenticated_user)):
 
 # ✅ 열선 도로 추천
 @router.post("/recommend")
-def road_recommendations(input_data: UserInput,
-    user: dict = Depends(get_authenticated_user)):
+def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authenticated_user)):
   """가중치를 적용하여 추천 점수를 계산하고 json형식으로 로그 저장(상위10개)"""
   try:
     connection = get_connection()
@@ -62,10 +60,9 @@ def road_recommendations(input_data: UserInput,
     roads = cursor.fetchall()
 
     if not roads:
-      raise HTTPException(status_code=404,
-                          detail=f"'{input_data.region}'에 해당하는 도로 데이터가 없습니다.")
+      raise HTTPException(status_code=404, detail=f"'{input_data.region}'에 해당하는 도로 데이터가 없습니다.")
 
-    # Apply user-defined weights
+    # user-defined weights 적용 
     recommended_roads = []
     for road in roads:
       pred_idx = (
@@ -84,17 +81,17 @@ def road_recommendations(input_data: UserInput,
         "pred_idx": pred_idx
       })
 
-    # Sort and select top 10 roads
+    # 상위 10개 
     recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"],reverse=True)[:10]
 
     # Convert list to JSON format
     recommended_roads_json = json.dumps(recommended_roads, ensure_ascii=False)
 
-    # Cache recommendations in Redis
+    # Redis에 캐시 저장
     redis_key = f"recommendations:{user['sub']}:{input_data.region}"
-    redis_client.setex(redis_key, 600,recommended_roads_json)  # Cache for 10 minutes
+    redis_client.setex(redis_key, 600, recommended_roads_json)  # Cache for 10 minutes
 
-    # Store single log with JSON data
+    # JSON data로 저장 
     log_query = """
         INSERT INTO rec_road_log (user_email, recommended_roads)
         VALUES (%s, %s)
@@ -102,7 +99,18 @@ def road_recommendations(input_data: UserInput,
     cursor.execute(log_query, (user["sub"], recommended_roads_json))
     connection.commit()
 
-    return {"recommended_roads": recommended_roads}
+    cursor.execute("SELECT LAST_INSERT_ID()")
+    log_id = cursor.fetchone()["LAST_INSERT_ID()"]
+
+    return {
+        "log_id": log_id,  # log_id 필요 ?
+        "user_weights": {
+            "rd_slope_weight": input_data.rd_slope_weight,
+            "acc_occ_weight": input_data.acc_occ_weight,
+            "acc_sc_weight": input_data.acc_sc_weight
+        },
+        "recommended_roads": recommended_roads
+    }
   finally:
     cursor.close()
     connection.close()
@@ -111,7 +119,7 @@ def road_recommendations(input_data: UserInput,
 # ✅ 추천 로그 확인
 @router.get("/recommendations/log")
 def get_recommendation_logs(user: dict = Depends(get_authenticated_user)):
-  """Retrieve past recommendations stored in JSON format"""
+  """log 확인용"""
   try:
     connection = get_connection()
     cursor = connection.cursor(dictionary=True)
