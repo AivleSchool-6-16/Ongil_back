@@ -1,18 +1,40 @@
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
+from app.database.mysql_connect import get_connection
+from mysql.connector import Error
+from fastapi import HTTPException
 
 # 데이터 로드 함수
-def load_data(file_path):
-    """
-    CSV 데이터를 로드하고 필요한 컬럼이 모두 존재하는지 확인.
-    """
-    data = pd.read_csv(file_path)
-    required_columns = ['RDS_RG', 'ROAD_NAME', 'RD_SLOPE', 'ACC_OCC', 'ACC_SC']
-    for col in required_columns:
-        if col not in data.columns:
-            raise ValueError(f"Missing required column: {col}")
-    return data
+def get_road_info(region: str):
+    """Fetch road information from the road_info table for a given region."""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        query = """
+            SELECT road_id, rds_id, road_cd, road_name, sig_cd, rds_rg, wdr_rd_cd, 
+                   rbp, rep, rd_slope, acc_occ, acc_sc 
+            FROM road_info 
+            WHERE rds_rg = %s
+        """
+        cursor.execute(query, (region,))
+        roads = cursor.fetchall()
+
+        if not roads:
+            raise HTTPException(status_code=404, detail=f"No road data found for region '{region}'.")
+
+        return roads
+
+    except Error as e:
+        print(f"Database error: {e}")
+        raise HTTPException(status_code=500, detail="Database query failed.")
+
+    finally:
+        if "cursor" in locals() and cursor:
+            cursor.close()
+        if "connection" in locals() and connection.is_connected():
+            connection.close()
 
 # 모델 학습 함수
 def train_model(data):

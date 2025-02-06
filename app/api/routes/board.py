@@ -363,7 +363,7 @@ async def update_post(
         cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
         updated_post = cursor.fetchone()
 
-        # 🔹 datetime 변환 (post_time)
+        # datetime 변환 (post_time)
         if updated_post and "post_time" in updated_post:
             updated_post["post_time"] = updated_post["post_time"].isoformat()
 
@@ -374,7 +374,7 @@ async def update_post(
         """, (post_id,))
         updated_files = cursor.fetchall()
 
-        # 🔹 파일의 datetime 변환 (upload_time)
+        # 파일의 datetime 변환 (upload_time)
         for file in updated_files:
             if "upload_time" in file:
                 file["upload_time"] = file["upload_time"].isoformat()
@@ -468,7 +468,7 @@ def search_posts(title: Optional[str] = Query(None), text: Optional[str] = Query
         cursor.execute(query, tuple(params))
         results = cursor.fetchall()
 
-        # Redis에서 실시간 조회수 반영
+        # Redis에서 실시간 조회수 가져오기 
         for post in results:
             redis_key = f"post_views:{post['post_id']}"
             redis_views = redis_client.get(redis_key)
@@ -493,17 +493,15 @@ async def add_comment(post_id: int,request: CommentRequest,user: dict = Depends(
         cursor.execute(query, (post_id, user["sub"], request.comment))
         connection.commit()
 
-        # 생성된 댓글 가져오기
-        cursor.execute(
+        # 생성된 댓글 가져오기 - socket
+        cursor.execute( 
             "SELECT * FROM comments WHERE post_id = %s ORDER BY comment_date DESC LIMIT 1",
             (post_id,))
         new_comment = cursor.fetchone()
 
-        # 🔹 datetime 변환 (comment_date)
+        # datetime 변환 (comment_date)
         if new_comment and "comment_date" in new_comment:
             new_comment["comment_date"] = new_comment["comment_date"].isoformat()
-
-        # WebSocket 전송
         await notify_new_comment(new_comment)
 
         return {"message": "댓글이 등록되었습니다.", "comment": new_comment}
@@ -548,24 +546,22 @@ async def add_answer(post_id: int, request: AnswerRequest, user: dict = Depends(
     """관리자 답변 """
     try:
         connection = get_connection()
-        cursor = connection.cursor(dictionary=True)  # ✅ dictionary=True 추가
+        cursor = connection.cursor(dictionary=True) 
 
         # 답변 삽입
         query = "INSERT INTO answer (post_id, user_email, ans_text, ans_date) VALUES (%s, %s, %s, NOW())"
         cursor.execute(query, (post_id, user["sub"], request.answer))
         connection.commit()
 
-        # ✅ 생성된 답변 가져오기
+        # 생성된 답변 가져오기 -socket
         cursor.execute(
             "SELECT * FROM answer WHERE post_id = %s ORDER BY ans_date DESC LIMIT 1",
             (post_id,))
         new_answer = cursor.fetchone()
 
-        # 🔹 datetime 변환 (ans_date)
+        # datetime 변환 (ans_date)
         if new_answer and "ans_date" in new_answer:
             new_answer["ans_date"] = new_answer["ans_date"].isoformat()
-
-        # ✅ WebSocket 전송
         await notify_new_answer(new_answer)
 
         return {"message": "관리자 답변이 등록되었습니다.", "answer": new_answer}
@@ -598,7 +594,7 @@ async def delete_answer(post_id: int, answer_id: int, user: dict = Depends(get_a
         # WebSocket을 통해 삭제된 답변 알림
         await notify_deleted_answer({"post_id": post_id, "answer_id": answer_id})
 
-        return {"message": "관리자 답변이 삭제되었습니다."}
+        return {"message": "답변이 삭제되었습니다."}
     finally:
         cursor.close()
         connection.close()
@@ -652,8 +648,8 @@ async def get_comments_and_answers(post_id: int):
         ]
         return {
             "post_id": post_id,
-            "comments": comments_list,  #`user_name`, `user_dept`, `jurisdiction` 포함
-            "admin_answers": answers_list  #`answer_text`, `answer_date`만 포함
+            "comments": comments_list, 
+            "admin_answers": answers_list 
         }
 
     finally:
@@ -686,7 +682,7 @@ def get_post_files(post_id: int):
         connection.commit()
 
     if not valid_files:
-      raise HTTPException(status_code=404,detail="No files found for this post.")
+      raise HTTPException(status_code=404,detail="이 게시글에는 업로드된 파일이 없습니다.")
 
     return {"files": valid_files}
   finally:
