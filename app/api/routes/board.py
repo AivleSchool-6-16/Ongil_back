@@ -316,7 +316,7 @@ async def update_post(
             cursor.execute("DELETE FROM file_metadata WHERE file_id = %s", (file["file_id"],))
             connection.commit()
 
-        # 3️. 파일 추가 (새 파일 업로드)
+        # 3. 파일 추가 (새 파일 업로드)
         uploaded_files_data = []
         if files:
             MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -359,9 +359,13 @@ async def update_post(
                     "file_type": detected_mime
                 })
 
-        # 4️. 수정된 게시글 데이터 조회
+        # 4. 수정된 게시글 데이터 조회
         cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
         updated_post = cursor.fetchone()
+
+        # 🔹 datetime 변환 (post_time)
+        if updated_post and "post_time" in updated_post:
+            updated_post["post_time"] = updated_post["post_time"].isoformat()
 
         # 5️. 수정된 파일 목록 가져오기
         cursor.execute("""
@@ -370,19 +374,31 @@ async def update_post(
         """, (post_id,))
         updated_files = cursor.fetchall()
 
-        # WebSocket을 통해 수정된 게시글 정보 전송
-        update_data = {
-            "updated_post": updated_post,
-            "files": updated_files 
-        }
-        await notify_updated_post(update_data)
+        # 🔹 파일의 datetime 변환 (upload_time)
+        for file in updated_files:
+            if "upload_time" in file:
+                file["upload_time"] = file["upload_time"].isoformat()
 
+        # WebSocket을 통해 수정된 게시글 정보 전송
+        post_data = {
+            "post_id": updated_post["post_id"],
+            "board_id": updated_post["board_id"],
+            "user_email": updated_post["user_email"],
+            "post_title": updated_post["post_title"],
+            "post_category": updated_post["post_category"],
+            "post_text": updated_post["post_text"],
+            "post_time": updated_post["post_time"],
+            "views": updated_post["views"],
+            "files": updated_files
+        }
+        await notify_updated_post(post_data)
+
+        # 최종 응답 반환
         return {
             "message": "게시글이 수정되었습니다.",
             "post": updated_post,
             "files": updated_files
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
