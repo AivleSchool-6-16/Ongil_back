@@ -617,7 +617,7 @@ async def get_comments_and_answers(post_id: int):
 
         # 해당 게시글의 댓글 가져오기
         cursor.execute("""
-            SELECT c.comment_id, u.user_name, u.user_dept, u.jurisdiction, c.comment, c.comment_date
+            SELECT c.comment_id, u.user_email, u.user_name, u.user_dept, u.jurisdiction, c.comment, c.comment_date
             FROM comments c
             JOIN user_data u ON c.user_email = u.user_email
             WHERE c.post_id = %s
@@ -638,11 +638,12 @@ async def get_comments_and_answers(post_id: int):
         comments_list = [
             {
                 "comment_id": c[0],
-                "user_name": c[1],  # 사용자 이름
-                "user_dept": c[2],  # 부서 정보
-                "jurisdiction": c[3],  # 관할권 정보
-                "comment": c[4],
-                "comment_date": c[5].isoformat()
+                "user_email": c[1],
+                "user_name": c[2],  # 사용자 이름
+                "user_dept": c[3],  # 부서 정보
+                "jurisdiction": c[4],  # 관할권 정보
+                "comment": c[5],
+                "comment_date": c[6].isoformat()
             } for c in comments
         ]
         answers_list = [
