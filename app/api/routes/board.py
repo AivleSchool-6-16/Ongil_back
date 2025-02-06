@@ -1,6 +1,6 @@
 # 문의 게시판
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
-from fastapi import File, UploadFile
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import File, Form, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -9,9 +9,9 @@ import magic
 import redis
 import os
 import subprocess
-import uuid
+from typing import List, Optional
 from app.database.mysql_connect import get_connection
-from app.core.jwt_utils import verify_token, get_authenticated_user
+from app.core.jwt_utils import get_authenticated_user
 from app.api.socket import *
 
 router = APIRouter()
@@ -22,8 +22,7 @@ if not os.path.exists(UPLOAD_FOLDER):
   os.makedirs(UPLOAD_FOLDER)
 
 try:
-  redis_client = redis.StrictRedis(host="localhost", port=6379, db=0,
-                                   decode_responses=True)
+  redis_client = redis.StrictRedis(host="localhost", port=6379, db=0, decode_responses=True)
 except Exception as e:
   print(f"Redis connection failed: {e}")
   redis_client = None
@@ -74,15 +73,14 @@ class PostUpdateRequest(BaseModel):
   post_category: Optional[str] = None
   post_text: Optional[str] = None
 
-
 # 댓글 등록 요청 모델
 class CommentRequest(BaseModel):
   comment: str
 
-
 # 관리자 답변 요청 모델
 class AnswerRequest(BaseModel):
   answer: str
+
 
 # ✅ 1. 전체 게시글 조회 (조회수 실시간 반영)
 @router.get("/")
@@ -94,7 +92,7 @@ def get_all_posts(user: dict = Depends(get_authenticated_user)):
 
         # ✅ `user_data` 조인하여 `user_dept`, `jurisdiction` 가져오기
         query = """
-            SELECT p.post_id, p.board_id, u.user_dept, u.jurisdiction, 
+            SELECT p.post_id, p.board_id, p.user_email, u.user_dept, u.jurisdiction, 
                    p.post_title, p.post_category, p.post_time, p.views
             FROM Posts p
             JOIN user_data u ON p.user_email = u.user_email
@@ -152,9 +150,6 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user),backgrou
         redis_views = int(redis_client.get(redis_key)) if redis_client.get(redis_key) else 0
         post["views"] += redis_views
 
-        # ✅ 응답 데이터에서 `user_email` 제거 (보안 강화)
-        del post["user_email"]
-
         return {"post": post}
 
     finally:
@@ -166,7 +161,7 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user),backgrou
 @router.post("/")
 async def create_post_with_file(
     request: PostCreateRequest = Depends(),
-    file: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None),  # 여러 파일을 받도록 변경
     user: dict = Depends(get_authenticated_user)
 ):
     """게시글 작성 + 파일 업로드"""
@@ -176,61 +171,78 @@ async def create_post_with_file(
     try:
         cursor = connection.cursor()
 
-        # 1. 게시글 먼저 DB에 저장
+        # 1. 게시글을 먼저 DB에 저장
         query = """
             INSERT INTO Posts (board_id, user_email, post_title, post_category, post_text, post_time, views)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
-        cursor.execute(query, (request.board_id, user["sub"], request.post_title, request.post_category, request.post_text, datetime.now(), 0))
+        cursor.execute(
+            query,
+            (
+                request.board_id,
+                user["sub"],
+                request.post_title,
+                request.post_category,
+                request.post_text,
+                datetime.now(),
+                0,
+            )
+        )
         connection.commit()
 
-        # 2️. 방금 저장한 `post_id` 가져오기
+        # 2. 방금 저장한 `post_id` 가져오기
         cursor.execute("SELECT LAST_INSERT_ID()")
         post_id = cursor.fetchone()[0]
 
-        # 3. 파일이 있을 경우 처리
-        uploaded_file_data = None  # 업로드된 파일 정보 저장용
+        # 3. 파일이 있을 경우 처리 (파일은 여러 개일 수 있음)
+        uploaded_files_data = []  # 업로드된 파일 정보를 저장할 리스트
 
-        if file:
-            # 🔹 파일 크기 검사 (10MB 제한)
+        if files:
             MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-            content = await file.read()  # 🔥 비동기적으로 파일 읽기
-            file_size = len(content)
-            if file_size > MAX_FILE_SIZE:
-                raise HTTPException(status_code=400, detail="파일의 최대 크기는 10MB입니다.")
-
-            # 🔹 확장자 검사 (허용된 확장자 목록)
-            ext = file.filename.rsplit('.', 1)[-1].lower()
             allowed_extensions = ["png", "jpg", "jpeg", "gif"]
-            if ext not in allowed_extensions:
-                raise HTTPException(status_code=400, detail="허용되지 않은 확장자입니다.")
 
-            # 🔹 MIME 타입 검사 (`python-magic` 활용)
-            file_path = os.path.join(UPLOAD_FOLDER, file.filename)
-            with open(file_path, "wb") as f:
-                f.write(content)  # 🔥 content를 한 번만 사용 (파일 저장)
+            for file in files:
+                content = await file.read()  # 파일 내용을 비동기적으로 읽기
+                file_size = len(content)
+                if file_size > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}의 최대 크기는 10MB입니다.")
 
-            mime = magic.Magic(mime=True)
-            detected_mime = mime.from_file(file_path)
+                # 확장자 검사
+                if '.' not in file.filename:
+                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}에 확장자가 없습니다.")
+                ext = file.filename.rsplit('.', 1)[-1].lower()
+                if ext not in allowed_extensions:
+                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}: 허용되지 않은 확장자입니다.")
 
-            if not detected_mime.startswith("image/"):
-                os.remove(file_path)  # 🔥 MIME 타입이 이미지가 아닐 경우 파일 삭제
-                raise HTTPException(status_code=400, detail="허용되지 않은 파일 형식입니다.")
+                # 파일 저장
+                file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+                with open(file_path, "wb") as f:
+                    f.write(content)
 
-            # 🔹 파일 정보를 DB에 저장
-            file_query = """
-                INSERT INTO file_metadata (post_id, file_name, file_path, file_size, file_type, user_email, upload_time)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW())
-            """
-            cursor.execute(file_query, (post_id, file.filename, file_path, file_size, detected_mime, user["sub"]))
-            connection.commit()
+                # MIME 타입 검사 (python-magic 사용)
+                mime = magic.Magic(mime=True)
+                detected_mime = mime.from_file(file_path)
+                if not detected_mime.startswith("image/"):
+                    os.remove(file_path)  # 이미지가 아니면 파일 삭제
+                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}: 허용되지 않은 파일 형식입니다.")
 
-            uploaded_file_data = {
-                "file_name": file.filename,
-                "file_path": file_path,
-                "file_size": file_size,
-                "file_type": detected_mime
-            }
+                # 파일 정보를 DB에 저장
+                file_query = """
+                    INSERT INTO file_metadata (post_id, file_name, file_path, file_size, file_type, user_email, upload_time)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                """
+                cursor.execute(
+                    file_query,
+                    (post_id, file.filename, file_path, file_size, detected_mime, user["sub"])
+                )
+                connection.commit()
+
+                uploaded_files_data.append({
+                    "file_name": file.filename,
+                    "file_path": file_path,
+                    "file_size": file_size,
+                    "file_type": detected_mime
+                })
 
         # 4. 생성된 게시글 데이터 가져오기
         cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
@@ -246,11 +258,11 @@ async def create_post_with_file(
             "post_text": new_post[5],
             "post_time": new_post[6].isoformat(),
             "views": new_post[7],
-            "file": uploaded_file_data  # 업로드된 파일 정보 추가
+            "files": uploaded_files_data  # 업로드된 파일 정보를 리스트로 추가
         }
         await notify_new_post(post_data)
 
-        return {"message": "게시글이 등록되었습니다.", "post_id": post_id, "file": uploaded_file_data}
+        return {"message": "게시글이 등록되었습니다.", "post_id": post_id, "files": uploaded_files_data}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -261,74 +273,203 @@ async def create_post_with_file(
             connection.close()
 
 
-# ✅ 4. 게시글 수정
+# ✅ 4. 게시글 수정 권한 확인 
+@router.get("/{post_id}/edit")
+async def get_post_for_edit(post_id: int, user: dict = Depends(get_authenticated_user)):
+    """게시글 수정 페이지 접근 - 권한 확인 및 기존 데이터 반환"""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        # ✅ 1️⃣ 게시글 가져오기 (작성자만 접근 가능)
+        cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
+        post = cursor.fetchone()
+        if not post:
+            raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
+
+        if post["user_email"] != user["sub"]:
+            raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
+
+        # ✅ 2️⃣ 첨부 파일 목록 가져오기
+        cursor.execute("SELECT file_id, file_name, file_path FROM file_metadata WHERE post_id = %s", (post_id,))
+        files = cursor.fetchall()
+
+        return {
+            "post": post,
+            "files": files
+        }
+    finally:
+        cursor.close()
+        connection.close()
+
+# ✅ 4-1. 게시글 수정
 @router.put("/{post_id}")
-async def update_post(post_id: int, request: PostUpdateRequest, user: dict = Depends(get_authenticated_user)):
-  """게시글 수정 - 본인 혹은 관리자만 """
-  try:
+async def update_post(
+    post_id: int,
+    post_title: Optional[str] = Form(None),
+    post_category: Optional[str] = Form(None),
+    post_text: Optional[str] = Form(None),
+    delete_files: Optional[List[int]] = Form(None),
+    files: Optional[List[UploadFile]] = File(None),
+    user: dict = Depends(get_authenticated_user)
+):
+    """게시글 및 파일 수정"""
     connection = get_connection()
-    cursor = connection.cursor()
+    cursor = None
 
-    cursor.execute("SELECT user_email FROM Posts WHERE post_id = %s",
-                   (post_id,))
-    post = cursor.fetchone()
+    try:
+        cursor = connection.cursor(dictionary=True)
 
-    if not post or (post[0] != user["sub"] and not user.get("admin")):
-      raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
+        # ✅ 1️⃣ 권한 확인 (본인 or 관리자만 가능)
+        cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
+        post = cursor.fetchone()
 
-    query = "UPDATE Posts SET post_title = %s, post_category = %s, post_text = %s WHERE post_id = %s"
-    cursor.execute(query, (
-      request.post_title, request.post_category, request.post_text, post_id))
-    connection.commit()
+        if not post or (post["user_email"] != user["sub"] and not user.get("admin")):
+            raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
 
-    # 수정된 게시글 가져오기
-    cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
-    updated_post = cursor.fetchone()
+        # ✅ 2️⃣ 기존 값 유지하며 게시글 수정
+        update_query = """
+            UPDATE Posts
+            SET 
+                post_title = COALESCE(%s, post_title), 
+                post_category = COALESCE(%s, post_category), 
+                post_text = COALESCE(%s, post_text)
+            WHERE post_id = %s
+        """
+        cursor.execute(update_query, (
+            post_title, post_category, post_text, post_id
+        ))
+        connection.commit()
 
-    # WebSocket을 통해 게시글 수정 알림
-    await notify_updated_post(updated_post)
+        # ✅ 3️⃣ 파일 삭제 처리 (삭제할 파일 ID 리스트 확인)
+        if delete_files:
+            delete_file_ids = delete_files if isinstance(delete_files, list) else [int(delete_files)]
+            for file_id in delete_file_ids:
+                cursor.execute("SELECT file_path FROM file_metadata WHERE file_id = %s", (file_id,))
+                file_entry = cursor.fetchone()
+                if file_entry:
+                    file_path = file_entry["file_path"]
+                    if os.path.exists(file_path):
+                        os.remove(file_path)  # 실제 파일 삭제
+                    cursor.execute("DELETE FROM file_metadata WHERE file_id = %s", (file_id,))  # DB에서 삭제
+            connection.commit()
 
-    return {"message": "게시글이 수정되었습니다."}
-  finally:
-    cursor.close()
-    connection.close()
+        # ✅ 4️⃣ 새로운 파일 업로드 처리
+        uploaded_files = []  # 업로드된 파일 정보 저장
 
+        if files:
+            for file in files:
+                content = await file.read()  # 🔥 파일 비동기 읽기
+                file_size = len(content)
+
+                # 🔹 파일 크기 검사 (10MB 제한)
+                MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+                if file_size > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=400, detail="파일의 최대 크기는 10MB입니다.")
+
+                # 🔹 확장자 검사
+                ext = file.filename.rsplit('.', 1)[-1].lower()
+                allowed_extensions = ["png", "jpg", "jpeg", "gif"]
+                if ext not in allowed_extensions:
+                    raise HTTPException(status_code=400, detail="허용되지 않은 확장자입니다.")
+
+                # 🔹 MIME 타입 검사
+                file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+                with open(file_path, "wb") as f:
+                    f.write(content)
+
+                mime = magic.Magic(mime=True)
+                detected_mime = mime.from_file(file_path)
+
+                if not detected_mime.startswith("image/"):
+                    os.remove(file_path)  # MIME 타입이 이미지가 아닐 경우 파일 삭제
+                    raise HTTPException(status_code=400, detail="허용되지 않은 파일 형식입니다.")
+
+                # 🔹 DB에 파일 정보 저장
+                file_query = """
+                    INSERT INTO file_metadata (post_id, file_name, file_path, file_size, file_type, user_email, upload_time)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                """
+                cursor.execute(file_query, (post_id, file.filename, file_path, file_size, detected_mime, user["sub"]))
+                connection.commit()
+
+                uploaded_files.append({
+                    "file_name": file.filename,
+                    "file_path": file_path,
+                    "file_size": file_size,
+                    "file_type": detected_mime
+                })
+
+        # ✅ 5️⃣ 수정된 게시글 정보 가져오기
+        cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
+        updated_post = cursor.fetchone()
+
+        # ✅ 6️⃣ WebSocket을 통해 수정된 게시글 알림
+        post_data = {
+            "post_id": updated_post["post_id"],
+            "board_id": updated_post["board_id"],
+            "user_email": updated_post["user_email"],
+            "post_title": updated_post["post_title"],
+            "post_category": updated_post["post_category"],
+            "post_text": updated_post["post_text"],
+            "post_time": updated_post["post_time"].isoformat(),
+            "views": updated_post["views"],
+            "files": uploaded_files  # 새로 추가된 파일 정보 포함
+        }
+        await notify_updated_post(post_data)
+
+        return {"message": "게시글이 수정되었습니다.", "updated_files": uploaded_files}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        if cursor:
+            cursor.close()
+            connection.close()
 
 # ✅ 5. 게시글 삭제
 @router.delete("/{post_id}")
 def delete_post(post_id: int, user: dict = Depends(get_authenticated_user)):
-  """게시글 삭제 - 본인 혹은 관리자만 """
-  try:
-    connection = get_connection()
-    cursor = connection.cursor()
+    """게시글 삭제"""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
 
-    cursor.execute("SELECT user_email FROM Posts WHERE post_id = %s",
-                   (post_id,))
-    post = cursor.fetchone()
+        # 삭제할 게시글의 소유자 확인
+        cursor.execute("SELECT user_email FROM Posts WHERE post_id = %s", (post_id,))
+        post = cursor.fetchone()
 
-    if not post or (post[0] != user["sub"] and not user.get("admin")):
-      raise HTTPException(status_code=403, detail="삭제 권한이 없습니다.")
+        if not post or (post[0] != user["sub"] and not user.get("admin")):
+            raise HTTPException(status_code=403, detail="삭제 권한이 없습니다.")
 
-    cursor.execute("DELETE FROM Posts WHERE post_id = %s", (post_id,))
-    connection.commit()
+        # 1. 관련 댓글 삭제
+        cursor.execute("DELETE FROM comments WHERE post_id = %s", (post_id,))
+        
+        # 2. 관련 답변 삭제
+        cursor.execute("DELETE FROM answer WHERE post_id = %s", (post_id,))
+        
+        # 3. 게시글 삭제
+        cursor.execute("DELETE FROM Posts WHERE post_id = %s", (post_id,))
+        connection.commit()
 
-    return {"message": "게시글이 삭제되었습니다."}
-  finally:
-    cursor.close()
-    connection.close()
+        return {"message": "게시글이 삭제되었습니다."}
+    finally:
+        cursor.close()
+        connection.close()
 
 
 # ✅ 6. 게시글 검색
 @router.get("/search/")
-def search_posts(text: Optional[str] = Query(None), author: Optional[str] = Query(None), user: dict = Depends(get_authenticated_user)):
-    """게시글 검색 - `user_dept`, `jurisdiction` 포함"""
+def search_posts(title: Optional[str] = Query(None), text: Optional[str] = Query(None), user: dict = Depends(get_authenticated_user)):
+    """게시글 검색 - 타이틀 혹은 내용"""
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
         # ✅ `user_data` 조인하여 `user_dept`, `jurisdiction` 가져오기
         query = """
-            SELECT p.post_id, p.board_id, u.user_dept, u.jurisdiction, 
+            SELECT p.post_id, p.board_id, p.user_email, u.user_dept, u.jurisdiction, 
                    p.post_title, p.post_category, p.post_time, p.views
             FROM Posts p
             JOIN user_data u ON p.user_email = u.user_email
@@ -336,14 +477,13 @@ def search_posts(text: Optional[str] = Query(None), author: Optional[str] = Quer
         """
         params = []
         
-        if text:
-            query += " AND (p.post_title LIKE %s OR p.post_text LIKE %s)"
-            params.append(f"%{text}%")
-            params.append(f"%{text}%")
+        if title:
+            query += " AND p.post_title LIKE %s"
+            params.append(f"%{title}%")
         
-        if author:
-            query += " AND u.user_dept LIKE %s"
-            params.append(f"%{author}%")  # `author`는 부서 정보로 검색
+        if text:
+            query += " AND p.post_text LIKE %s"
+            params.append(f"%{text}%")  
 
         cursor.execute(query, tuple(params))
         results = cursor.fetchall()
