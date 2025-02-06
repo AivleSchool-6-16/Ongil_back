@@ -59,20 +59,6 @@ def scan_file_with_clamav(file_path: str) -> bool:
     print("[ClamAV] clamscan command not found. Please install ClamAV.")
     return False
 
-
-# 게시글 등록 요청 모델
-class PostCreateRequest(BaseModel):
-  board_id: int  # 0: 비밀글, 1: 공개글
-  post_title: str
-  post_category: str
-  post_text: str
-
-# 게시글 수정 요청 모델
-class PostUpdateRequest(BaseModel):
-  post_title: Optional[str] = None
-  post_category: Optional[str] = None
-  post_text: Optional[str] = None
-
 # 댓글 등록 요청 모델
 class CommentRequest(BaseModel):
   comment: str
@@ -90,7 +76,7 @@ def get_all_posts(user: dict = Depends(get_authenticated_user)):
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # ✅ `user_data` 조인하여 `user_dept`, `jurisdiction` 가져오기
+        # `user_data` 조인하여 `user_dept`, `jurisdiction` 가져오기
         query = """
             SELECT p.post_id, p.board_id, p.user_email, u.user_dept, u.jurisdiction, 
                    p.post_title, p.post_category, p.post_time, p.views
@@ -100,7 +86,7 @@ def get_all_posts(user: dict = Depends(get_authenticated_user)):
         cursor.execute(query)
         posts = cursor.fetchall()
 
-        # ✅ Redis에서 조회수 가져와서 실시간 반영
+        # Redis에서 조회수 가져와서 실시간 반영
         for post in posts:
             redis_key = f"post_views:{post['post_id']}"
             redis_views = redis_client.get(redis_key)
@@ -121,7 +107,7 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user),backgrou
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # ✅ `user_email`을 포함하여 게시글 작성자 정보 가져오기
+        # `user_email`을 포함하여 게시글 작성자 정보 가져오기
         query = """
             SELECT p.post_id, p.board_id, p.user_email, u.user_name, u.user_dept, u.jurisdiction, 
                    p.post_title, p.post_category, p.post_text, p.post_time, p.views
@@ -135,18 +121,18 @@ def get_post(post_id: int, user: dict = Depends(get_authenticated_user),backgrou
         if not post:
             raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
 
-        # ✅ 비밀글 접근 제한 검사 (user_email 활용)
+        # 비밀글 접근 제한 검사
         is_owner = user["sub"] == post["user_email"]
         is_admin = user.get("admin", False)
 
         if post["board_id"] == 0 and not is_owner and not is_admin:
             raise HTTPException(status_code=403, detail="비밀글에 접근할 수 없습니다.")
 
-        # ✅ Redis에서 조회수 증가
+        # Redis에서 조회수 증가
         redis_key = f"post_views:{post_id}"
         redis_client.incr(redis_key)
 
-        # ✅ 실시간 조회수 반영 (MySQL 값 + Redis 값)
+        # 실시간 조회수 반영 (MySQL 값 + Redis 값)
         redis_views = int(redis_client.get(redis_key)) if redis_client.get(redis_key) else 0
         post["views"] += redis_views
 
@@ -269,7 +255,7 @@ async def get_post_for_edit(post_id: int, user: dict = Depends(get_authenticated
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # ✅ 1️⃣ 게시글 가져오기 (작성자만 접근 가능)
+        # 1. 게시글 가져오기 (작성자만 접근 가능)
         cursor.execute("SELECT * FROM Posts WHERE post_id = %s", (post_id,))
         post = cursor.fetchone()
         if not post:
@@ -278,7 +264,7 @@ async def get_post_for_edit(post_id: int, user: dict = Depends(get_authenticated
         if post["user_email"] != user["sub"]:
             raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
 
-        # ✅ 2️⃣ 첨부 파일 목록 가져오기
+        # 2. 첨부 파일 목록 가져오기
         cursor.execute("SELECT file_id, file_name, file_path FROM file_metadata WHERE post_id = %s", (post_id,))
         files = cursor.fetchall()
 
@@ -465,7 +451,7 @@ def search_posts(title: Optional[str] = Query(None), text: Optional[str] = Query
         cursor.execute(query, tuple(params))
         results = cursor.fetchall()
 
-        # ✅ Redis에서 실시간 조회수 반영
+        # Redis에서 실시간 조회수 반영
         for post in results:
             redis_key = f"post_views:{post['post_id']}"
             redis_views = redis_client.get(redis_key)
@@ -657,13 +643,12 @@ def get_post_files(post_id: int):
     cursor.execute(query, (post_id,))
     files = cursor.fetchall()
 
-    # Check if files exist, delete from DB if missing
+    # 파일 없으면 db 메타 데이터 정리 
     valid_files = []
     for file in files:
       if os.path.exists(file["file_path"]):
         valid_files.append(file)
       else:
-        # vk
         delete_query = "DELETE FROM file_metadata WHERE file_id = %s"
         cursor.execute(delete_query, (file["file_id"],))
         connection.commit()
@@ -717,7 +702,7 @@ def delete_file(file_id: int, user: dict = Depends(get_authenticated_user)):
     connection = get_connection()
     cursor = connection.cursor(dictionary=True)
 
-    # Retrieve file details
+    # 파일 확인 
     query = "SELECT file_path, user_email FROM file_metadata WHERE file_id = %s"
     cursor.execute(query, (file_id,))
     file = cursor.fetchone()
@@ -725,16 +710,15 @@ def delete_file(file_id: int, user: dict = Depends(get_authenticated_user)):
     if not file:
       raise HTTPException(status_code=404, detail="File not found.")
 
-    # Check if user is authorized to delete
+    # 파일 권한 확인 
     if file["user_email"] != user["sub"] and not user.get("admin"):
-      raise HTTPException(status_code=403,
-                          detail="You do not have permission to delete this file.")
+      raise HTTPException(status_code=403,detail="파일 삭제 권한이 없습니다.")
 
-    # Delete the actual file from the disk
+    # 실제 파일 삭제 
     if os.path.exists(file["file_path"]):
       os.remove(file["file_path"])
 
-    # Remove file metadata from the database
+    # db에서 메타 데이터 삭제 
     delete_query = "DELETE FROM file_metadata WHERE file_id = %s"
     cursor.execute(delete_query, (file_id,))
     connection.commit()

@@ -85,16 +85,14 @@ def road_recommendations(input_data: UserInput,
       })
 
     # Sort and select top 10 roads
-    recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"],
-                               reverse=True)[:10]
+    recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"],reverse=True)[:10]
 
     # Convert list to JSON format
     recommended_roads_json = json.dumps(recommended_roads, ensure_ascii=False)
 
     # Cache recommendations in Redis
     redis_key = f"recommendations:{user['sub']}:{input_data.region}"
-    redis_client.setex(redis_key, 600,
-                       recommended_roads_json)  # Cache for 10 minutes
+    redis_client.setex(redis_key, 600,recommended_roads_json)  # Cache for 10 minutes
 
     # Store single log with JSON data
     log_query = """
@@ -139,8 +137,7 @@ def get_recommendation_logs(user: dict = Depends(get_authenticated_user)):
 
 # ✅ 파일 요청 
 @router.post("/file-request/{log_id}")
-def request_road_file(log_id: int,
-    user: dict = Depends(get_authenticated_user)):
+def request_road_file(log_id: int,user: dict = Depends(get_authenticated_user)):
   """파일 요청 api - rec_road_log의 ask_check로 확인"""
   try:
     connection = get_connection()

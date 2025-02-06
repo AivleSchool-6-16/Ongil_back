@@ -8,7 +8,7 @@ def get_connection():
             host="ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com",
             user="admin",
             password="aivle202406",
-            database="ongildb"
+            database="ongildb", charset='utf8mb4'
         )
         if connection.is_connected():
             return connection

@@ -70,8 +70,7 @@ def check_password(password: str, token: str = Header(...)):
   """비밀번호 확인 """
   try:
     if is_token_blacklisted(token):
-      raise HTTPException(status_code=401,
-                          detail="토큰이 만료되었습니다.")
+      raise HTTPException(status_code=401,detail="토큰이 만료되었습니다.")
 
     user_email = verify_token(token).get("sub")
 
@@ -102,8 +101,7 @@ def update_user(update_data: Dict[str, str], token: str = Header(...)):
   """user_ps, user_dept, jurisdiction만 가능"""
   try:
     if is_token_blacklisted(token):
-      raise HTTPException(status_code=401,
-                          detail="토큰이 만료되었습니다.")
+      raise HTTPException(status_code=401,detail="토큰이 만료되었습니다.")
 
     user_email = verify_token(token).get("sub")
 

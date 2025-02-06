@@ -137,11 +137,9 @@ def signup_send_code(request: SignUpRequest):
   - 이메일 중복 확인 후 인증 이메일 전송\n
   - Redis에 사용자 정보 저장 (10분 유지)
   """
-
   hashed_password = hash_password(request.password)
 
-  token = create_access_token(data={"sub": request.email},
-                              expires_delta=timedelta(minutes=10))
+  token = create_access_token(data={"sub": request.email},expires_delta=timedelta(minutes=10))
   user_data = {
     "email": request.email,
     "password": hashed_password,  # 해싱된 비밀번호 저장
@@ -149,8 +147,7 @@ def signup_send_code(request: SignUpRequest):
     "jurisdiction": request.jurisdiction,
     "department": request.department
   }
-  redis_client.setex(f"signup_data:{request.email}", timedelta(minutes=10),
-                     json.dumps(user_data))
+  redis_client.setex(f"signup_data:{request.email}", timedelta(minutes=10),json.dumps(user_data))
 
   if not send_signup_email(request.email, token):
     raise HTTPException(status_code=500, detail="인증 이메일 발송에 실패했습니다.")
@@ -171,18 +168,17 @@ def confirm_email(token: str = Query(...)):
     if not email:
       return RedirectResponse(url="/signup/error?error_type=invalid_token")
 
-    # Check if user already exists
+    # 이미 이메일이 있다면 
     if find_user_by_email(email):
       return RedirectResponse(url="localhost:5173/")
 
-    # Retrieve user data from Redis
+    # 레디스에서 확인 
     user_data_json = redis_client.get(f"signup_data:{email}")
     if not user_data_json:
       return RedirectResponse(url="/signup/error?error_type=missing_info")
 
     user_data = json.loads(user_data_json)
 
-    # Save user data to MySQL
     try:
       connection = get_connection()
       cursor = connection.cursor()
@@ -204,16 +200,17 @@ def confirm_email(token: str = Query(...)):
         cursor.close()
         connection.close()
 
-    # Remove user data from Redis
+    # 레디스에서 user data 삭제 
     redis_client.delete(f"signup_data:{email}")
 
-    # Redirect to login page upon success
+    # 로그인 페이지로 리디렉션 
     return RedirectResponse(url="localhost:5173/")
 
   except Exception:
     return RedirectResponse(url="/signup/error?error_type=unknown")
 
 
+# 3-1. 회원가입 인증 에러 
 @router.get("/signup/error", response_class=HTMLResponse)
 def signup_error(error_type: str = Query("unknown")):
   """
@@ -243,6 +240,8 @@ def signup_error(error_type: str = Query("unknown")):
     </html>
     """, status_code=400)
 
+
+# 로그인 
 @router.post("/login")
 def login_user(request: LoginRequest):
     user = find_user_by_email(request.email)
@@ -263,6 +262,7 @@ def login_user(request: LoginRequest):
         "is_admin": is_admin_user
     }
 
+# 로그아웃 
 @router.post("/logout")
 def logout(request: LogoutRequest):
     payload = verify_token(request.token)

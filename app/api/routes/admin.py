@@ -5,7 +5,7 @@ from datetime import datetime
 import csv
 import json
 import os
-from app.core.jwt_utils import verify_token, get_authenticated_user
+from app.core.jwt_utils import get_authenticated_user
 from app.database.mysql_connect import get_connection
 from app.core.email_utils import send_file_email
 
