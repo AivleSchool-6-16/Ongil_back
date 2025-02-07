@@ -84,8 +84,6 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
         "acc_sc": road["acc_sc"],
         "pred_idx": pred_idx
       })
-    
-    # 모델에 
 
     # 상위 10개 
     recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"],reverse=True)[:10]
@@ -105,11 +103,7 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
     cursor.execute(log_query, (user["sub"], recommended_roads_json))
     connection.commit()
 
-    cursor.execute("SELECT LAST_INSERT_ID()")
-    log_id = cursor.fetchone()["LAST_INSERT_ID()"]
-
     return {
-        "log_id": log_id,  # log_id 필요 ?
         "user_weights": {
             "rd_slope_weight": input_data.rd_slope_weight,
             "acc_occ_weight": input_data.acc_occ_weight,
@@ -152,26 +146,29 @@ def get_recommendation_logs(user: dict = Depends(get_authenticated_user)):
 
 # ✅ 파일 요청 
 @router.post("/file-request/{log_id}")
-def request_road_file(log_id: int,user: dict = Depends(get_authenticated_user)):
-  """파일 요청 api - rec_road_log의 ask_check로 확인"""
-  try:
-    connection = get_connection()
-    cursor = connection.cursor()
-    # Check if log_id exists and belongs to the user
-    query = "SELECT * FROM rec_road_log WHERE log_id = %s AND user_email = %s"
-    cursor.execute(query, (log_id, user["sub"]))
-    log_entry = cursor.fetchone()
+def request_road_file(user: dict = Depends(get_authenticated_user)):
+    """파일 요청 API - rec_road_log의 ask_check로 확인"""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
 
-    if not log_entry:
-      raise HTTPException(status_code=404, detail="추천 로그를 찾을 수 없거나 권한이 없습니다.")
+        # 가장 최근의 log_id를 가져옴
+        query = "SELECT log_id FROM rec_road_log WHERE user_email = %s ORDER BY log_id DESC LIMIT 1"
+        cursor.execute(query, (user["sub"],))
+        log_entry = cursor.fetchone()
 
-    # ask_check 0 to 1으로 업데이트
-    update_query = "UPDATE rec_road_log SET ask_check = 1 WHERE log_id = %s"
-    cursor.execute(update_query, (log_id,))
-    connection.commit()
+        if not log_entry:
+            raise HTTPException(status_code=404, detail="추천 로그를 찾을 수 없거나 권한이 없습니다.")
 
-    return {"message": f"파일 요청이 등록되었습니다 (log_id: {log_id})."}
-  finally:
-    cursor.close()
-    connection.close()
+        log_id = log_entry[0]  # 가장 최근 log_id 추출
+
+        # ask_check 0 -> 1로 업데이트
+        update_query = "UPDATE rec_road_log SET ask_check = 1 WHERE log_id = %s"
+        cursor.execute(update_query, (log_id,))
+        connection.commit()
+
+        return {"message": f"파일 요청이 등록되었습니다 (log_id: {log_id})."}
+    finally:
+        cursor.close()
+        connection.close()
 
