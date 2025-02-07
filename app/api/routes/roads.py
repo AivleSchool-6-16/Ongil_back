@@ -20,12 +20,13 @@ except Exception as e:
 
 # User input model
 class UserWeight(BaseModel):
-  sigungu: int
+  sigungu: int # 시군구 코드 5자리
   region: str
-  rd_slope_weight: float = 4.0
-  acc_occ_weight: float = 3.0
-  acc_sc_weight: float = 3.0
-
+  freezing_weight: float = 2.5
+  rd_slope_weight: float = 2.5
+  acc_occ_weight: float = 2.5
+  acc_sc_weight: float = 2.5
+  
 
 # ✅ 지역 지정
 @router.get("/get_district")
@@ -69,7 +70,9 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
       pred_idx = (
           road["rd_slope"] * input_data.rd_slope_weight +
           road["acc_occ"] * input_data.acc_occ_weight +
-          road["acc_sc"] * input_data.acc_sc_weight
+          road["acc_sc"] * input_data.acc_sc_weight +
+          input_data.freezing_weight
+          
       )
       recommended_roads.append({
         "road_id": road["road_id"],
@@ -81,6 +84,8 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
         "acc_sc": road["acc_sc"],
         "pred_idx": pred_idx
       })
+    
+    # 모델에 
 
     # 상위 10개 
     recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"],reverse=True)[:10]
@@ -108,7 +113,8 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
         "user_weights": {
             "rd_slope_weight": input_data.rd_slope_weight,
             "acc_occ_weight": input_data.acc_occ_weight,
-            "acc_sc_weight": input_data.acc_sc_weight
+            "acc_sc_weight": input_data.acc_sc_weight,
+            "freezing_weight": input_data.freezing_weight
         },
         "recommended_roads": recommended_roads
     }
