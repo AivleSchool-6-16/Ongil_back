@@ -5,43 +5,60 @@ from email.mime.multipart import MIMEMultipart
 from email.message import EmailMessage
 import os
 
-# 인증번호 생성 함수
-def generate_verification_code():
-    return str(random.randint(100000, 999999))
+# SMTP 설정 (보내는 사람)
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SENDER_EMAIL = "ejji0001@gmail.com"  # 보내는 이메일
+SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
+SENDER_NAME = "온길 - Ongil"  # 보내는 사람 이름
 
-# 비밀번호 복구 메일 
-def send_verification_email(email: str, code: str):
-    smtp_server = "smtp.gmail.com" # 받는 메일 
-    smtp_port = 587
-    sender_email = "ejji0001@gmail.com" # 보내는 메일
-    sender_password = "defn mnnr cwdm xoms" # - 보안 문제 
 
-    message = MIMEText(f"인증번호: {code}")
-    message["Subject"] = "비밀번호 복구 인증번호"
-    message["From"] = sender_email
-    message["To"] = email
+def send_email(to_email: str, subject: str, body: str, is_html: bool = False, attachment_path: str = None):
+    """이메일 전송 함수 (텍스트/HTML/파일 첨부 가능)"""
+    msg = EmailMessage()
+    msg["From"] = f"{SENDER_NAME}"  # 보낸 사람 이름 설정
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.set_content(body, subtype="html" if is_html else "plain")
 
+    # 첨부 파일 추가
+    if attachment_path:
+        try:
+            with open(attachment_path, "rb") as file:
+                msg.add_attachment(file.read(), maintype="application", subtype="octet-stream", filename=os.path.basename(attachment_path))
+        except FileNotFoundError:
+            raise ValueError(f"❌ File not found: {attachment_path}")
+
+    # SMTP 서버에 연결하여 이메일 전송
     try:
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.ehlo()
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
             server.starttls()
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, email, message.as_string())
-        print("Email sent successfully")
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.send_message(msg)
+        print(f"✅ Email sent to {to_email}")
         return True
     except smtplib.SMTPAuthenticationError as auth_error:
-        print(f"Authentication failed: {auth_error}")
+        print(f"❌ Authentication failed: {auth_error}")
     except Exception as e:
-        print(f"Failed to send email: {e}")
+        print(f"❌ Failed to send email: {e}")
     return False
 
-# 회원가입 인증 메일 
-def send_signup_email(email: str, token: str):
-    smtp_server = "smtp.gmail.com"
-    smtp_port = 587
-    sender_email = "ejji0001@gmail.com"
-    sender_password = "defn mnnr cwdm xoms"
 
+def generate_verification_code():
+    """6자리 랜덤 인증번호 생성"""
+    return str(random.randint(100000, 999999))
+
+
+def send_verification_email(email: str, code: str):
+    """비밀번호 복구 인증번호 이메일 전송"""
+    subject = "비밀번호 복구 인증번호"
+    body = f"인증번호: {code}"
+    return send_email(email, subject, body)
+
+
+def send_signup_email(email: str, token: str):
+    """회원가입 이메일 인증 링크 전송"""
+    subject = "회원가입 이메일 인증"
     html_content = f"""
     <html>
         <body>
@@ -55,51 +72,9 @@ def send_signup_email(email: str, token: str):
         </body>
     </html>
     """
+    return send_email(email, subject, html_content, is_html=True)
 
-    message = MIMEMultipart("alternative")
-    message["Subject"] = "회원가입 이메일 인증"
-    message["From"] = sender_email
-    message["To"] = email
-    message.attach(MIMEText(html_content, "html"))
 
-    try:
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, email, message.as_string())
-        return True
-    except Exception as e:
-        print(f"Failed to send email: {e}")
-        return False
-    
 def send_file_email(to_email: str, subject: str, body: str, attachment_path: str = None):
-    """Send an email with an optional file attachment (CSV)."""
-    smtp_server = "smtp.gmail.com" # 받는 메일 
-    smtp_port = 587
-    sender_email = "ejji0001@gmail.com" # 보내는 메일
-    sender_password = "defn mnnr cwdm xoms"
-    
-    msg = EmailMessage()
-    msg["From"] = sender_email
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.set_content(body)
-
-    # Attach file if provided
-    if attachment_path:
-        try:
-            with open(attachment_path, "rb") as file:
-                msg.add_attachment(file.read(), maintype="application", subtype="octet-stream", filename=os.path.basename(attachment_path))
-        except FileNotFoundError:
-            raise ValueError(f"❌ File not found: {attachment_path}")
-
-    # Send email
-    try:
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()  # Secure connection
-            server.login(sender_email, sender_password)  # Login
-            server.send_message(msg)
-        print(f"Email sent to {to_email}")
-    except Exception as e:
-        print(f"❌ Email sending failed: {e}")
+    """파일 첨부 이메일 전송"""
+    return send_email(to_email, subject, body, attachment_path=attachment_path)
