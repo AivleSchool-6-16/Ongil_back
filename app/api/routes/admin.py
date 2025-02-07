@@ -8,6 +8,7 @@ import os
 from app.core.jwt_utils import get_authenticated_user
 from app.database.mysql_connect import get_connection
 from app.core.email_utils import send_file_email
+from app.api.socket import *
 
 router = APIRouter()
 
@@ -30,7 +31,7 @@ def get_file_requests(token: str = Depends(get_authenticated_user)):
 
         # file request 확인 
         query = """
-        SELECT r.log_id, r.user_email, u.user_dept, u.jurisdiction, r.c_date
+        SELECT r.log_id, r.user_email, r.approve, u.user_dept, u.jurisdiction, r.c_date
         FROM rec_road_log r
         JOIN user_data u ON r.user_email = u.user_email
         WHERE r.ask_check = 1
@@ -39,7 +40,7 @@ def get_file_requests(token: str = Depends(get_authenticated_user)):
         cursor.execute(query)
         requests = cursor.fetchall()
 
-        return {"file_requests": requests}
+        return {"file_requests": requests} # null: 확인 전, 0: 거부, 1: 승인 
     finally:
         cursor.close()
         connection.close()
@@ -65,7 +66,7 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
         user_email = request["user_email"]
         recommended_roads = json.loads(request["recommended_roads"])
 
-        # csv 파일로 만들기 
+        # CSV 파일 생성
         csv_filename = f"road_recommendations_{log_id}.csv"
         csv_filepath = f"./{csv_filename}"  # Temporary directory
 
@@ -78,15 +79,20 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
                     road["rd_slope"], road["acc_occ"], road["acc_sc"], road["pred_idx"]
                 ])
 
-        # 승인 메일 전송, csv 파일 첨부
+        # 승인 메일 전송
         email_subject = "도로 추천 결과 파일"
         email_body = f"{user_email}님,\n\n도로 추천 결과 파일을 첨부합니다."
         send_file_email(to_email=user_email, subject=email_subject, body=email_body, attachment_path=csv_filepath)
 
-        # 파일 삭제 
+        # 파일 삭제
         os.remove(csv_filepath)
 
-        return {"message": f"파일이 {user_email}님에게 전송되었습니다."}
+        # approve 상태를 1로 변경
+        update_query = "UPDATE rec_road_log SET approve = 1 WHERE log_id = %s"
+        cursor.execute(update_query, (log_id,))
+        connection.commit()
+
+        return {"message": f"파일이 {user_email}님에게 전송되었으며, 승인 처리되었습니다."}
     finally:
         cursor.close()
         connection.close()
@@ -111,10 +117,15 @@ def reject_file_request(log_id: int, user: dict = Depends(get_authenticated_user
 
         user_email = request["user_email"]
 
-        # 거부 메일 전송 
+        # 거부 메일 전송
         email_subject = "파일 요청이 거부되었습니다."
         email_body = f"{user_email}님,\n\n요청하신 도로 추천 파일이 거부되었습니다. 추가 문의는 관리자에게 연락하세요."
         send_file_email(to_email=user_email, subject=email_subject, body=email_body)
+
+        # approve 상태를 0으로 변경
+        update_query = "UPDATE rec_road_log SET approve = 0 WHERE log_id = %s"
+        cursor.execute(update_query, (log_id,))
+        connection.commit()
 
         return {"message": f"파일 요청이 거부되었으며 {user_email}님에게 알림이 전송되었습니다."}
     finally:

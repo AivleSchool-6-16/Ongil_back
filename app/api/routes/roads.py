@@ -145,7 +145,7 @@ def get_recommendation_logs(user: dict = Depends(get_authenticated_user)):
 
 
 # ✅ 파일 요청 
-@router.post("/file-request/{log_id}")
+@router.post("/file-request")
 def request_road_file(user: dict = Depends(get_authenticated_user)):
     """파일 요청 API - rec_road_log의 ask_check로 확인"""
     try:
