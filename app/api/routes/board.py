@@ -184,7 +184,7 @@ async def create_post_with_file(
                 content = await file.read()
                 file_size = len(content)
                 if file_size > MAX_FILE_SIZE:
-                    raise HTTPException(status_code=400, detail=f"파일 {file.filename}의 최대 크기는 10MB입니다.")
+                    raise HTTPException(status_code=400, detail=f"업로드 파일의 최대 크기는 10MB입니다.")
 
                 if '.' not in file.filename:
                     raise HTTPException(status_code=400, detail=f"파일 {file.filename}에 확장자가 없습니다.")
