@@ -28,8 +28,7 @@ def execute_query(query: str, params: tuple = ()):
     return result
   except Exception as e:
     traceback.print_exc()
-    raise HTTPException(status_code=500,
-                        detail="Database query execution failed.")
+    raise HTTPException(status_code=500,detail="Database query execution failed.")
   finally:
     if cursor:
       cursor.close()
@@ -145,42 +144,50 @@ def update_user(update_data: Dict[str, str], token: str = Header(...)):
 
 # 회원탈퇴 
 @router.delete("/delete_user")
-def delete_user(token: str = Header(...)):
-  """회원 탈퇴 (연관된 모든 데이터 삭제 후 user_data 삭제)"""
-  try:
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="만료된 토큰입니다.")
+def delete_user(token: str = Header()):
+    """회원 탈퇴 (연관된 모든 데이터 삭제 후 user_data 삭제)"""
+    try:
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="만료된 토큰입니다.")
 
-    user_email = payload["sub"]
-    if not user_email:
-      raise HTTPException(status_code=400, detail="Invalid token payload.")
+        user_email = payload.get("sub")
+        if not user_email:
+            raise HTTPException(status_code=400, detail="Invalid token payload.")
 
-    # 1. 모든 테이블에서 user_email 관련 데이터 삭제
-    related_tables = ["Posts", "answer", "comments", "file_metadata","permissions", "rec_road_log"]
+        # 1️. file_metadata, answer, comments 삭제 (Posts 참조)
+        related_tables_first = ["file_metadata", "answer", "comments"]
+        
+        for table in related_tables_first:
+            query_delete = f"DELETE FROM `{table}` WHERE post_id IN (SELECT post_id FROM Posts WHERE user_email = %s)"
+            execute_query(query_delete, (user_email,))
 
-    for table in related_tables:
-      query_delete = f"DELETE FROM {table} WHERE user_email = %s"
-      execute_query(query_delete, (user_email,))
+        # 2️. Posts 삭제
+        execute_query("DELETE FROM Posts WHERE user_email = %s", (user_email,))
 
-    # 2. user_data 테이블에서 사용자 삭제
-    query_delete_user = "DELETE FROM user_data WHERE user_email = %s"
-    execute_query(query_delete_user, (user_email,))
+        # 3️. user_email 관련 테이블 삭제
+        related_tables_second = ["log", "permissions", "rec_road_log"]
+        
+        for table in related_tables_second:
+            execute_query(f"DELETE FROM `{table}` WHERE user_email = %s", (user_email,))
 
-    # 3. 토큰을 블랙리스트에 추가하여 로그아웃 처리
-    expiration_time = payload.get("exp")
-    current_time = datetime.now(timezone.utc).timestamp()
-    remaining_time = max(int(expiration_time - current_time), 0)
-    add_token_to_blacklist(token, remaining_time)
+        # 4️. user_data 삭제
+        execute_query("DELETE FROM user_data WHERE user_email = %s", (user_email,))
 
-    return {"message": "회원 탈퇴가 완료되었습니다."}
+        # 5️. 토큰을 블랙리스트에 추가 
+        expiration_time = payload.get("exp")
+        current_time = datetime.now(timezone.utc).timestamp()
+        remaining_time = max(int(expiration_time - current_time), 0)
+        add_token_to_blacklist(token, remaining_time)
 
-  except mysql.connector.IntegrityError as e:
-    raise HTTPException(status_code=400,detail=f"Database integrity error: {str(e)}")
+        return {"message": "회원 탈퇴가 완료되었습니다."}
 
-  except Exception as e:
-    traceback.print_exc()
-    raise HTTPException(
-        status_code=500,
-        detail=f"회원 탈퇴에 실패하였습니다. Error: {str(e)}"
-    )
+    except mysql.connector.IntegrityError as e:
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {str(e)}")
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"회원 탈퇴에 실패하였습니다. Error: {str(e)}"
+        )
