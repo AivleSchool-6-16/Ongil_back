@@ -9,6 +9,7 @@
 <body>
     <h1>Socket.IO WebSocket 테스트</h1>
     <button onclick="connectSocket()">🔗 Socket.IO 연결</button>
+    <button onclick="disconnectSocket()">❌ 연결 종료</button>
     <div id="log"></div>
 
     <script>
@@ -17,53 +18,133 @@
         function logMessage(message) {
             document.getElementById("log").innerHTML += `<p>${message}</p>`;
         }
-    
+
         function connectSocket() {
-            const token = "token";  // 실제 인증 토큰 입력
-    
+            const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlamppMDYxM0BnbWFpbC5jb20iLCJhZG1pbiI6bnVsbCwiZXhwIjoxNzM4ODYzMDM2fQ.cGjiKPMgcy45Mqc7dbVKTm2HJLCmxNRfga6sQjPCx8I";
+
             // ✅ FastAPI Socket.IO 서버에 연결
             socket = io("http://localhost:8000", {
                 path: "/socket.io",
                 transports: ["websocket"],
                 query: { token: token }
             });
-    
+
             // ✅ 연결 성공
             socket.on("connect", () => {
-                logMessage(`✅ Socket.IO 연결 성공! (ID: ${socket.id})`);
+                logMessage(`✅ <b>Socket.IO 연결 성공!</b> (ID: ${socket.id})`);
             });
-    
+
             // ✅ 서버에서 메시지를 받을 때 실행
             socket.on("message", (data) => {
-                logMessage(`📩 서버로부터 메시지 수신: ${JSON.stringify(data)}`);
+                logMessage(`📩 <b>서버 메시지:</b> ${JSON.stringify(data)}`);
             });
-    
-            // ✅ 서버에서 게시글 알림 수신
+
+            // ✅ 새로운 게시글 알림
             socket.on("newPost", (post) => {
-                logMessage(`🆕 새로운 게시글: <b>${post.post_title}</b> - ${post.post_text}`);
-    
-                // 게시글을 동적으로 추가
-                const logDiv = document.getElementById("log");
-                const newPostElement = document.createElement("div");
-                newPostElement.innerHTML = `
-                    <h3>${post.post_title}</h3>
-                    <p>${post.post_text}</p>
-                    <small>작성자: ${post.user_email} | 시간: ${post.post_time}</small>
-                    <hr>
-                `;
-                logDiv.prepend(newPostElement);  // 최신 게시글이 위로 오도록 추가
+                logMessage(`🆕 <b>새 게시글:</b> ${post.post_title} - ${post.post_text}`);
+                addPostToLog(post);
             });
-    
+
+            // ✅ 게시글 수정 알림
+            socket.on("updatedPost", (post) => {
+                logMessage(`✏️ <b>게시글 수정됨:</b> ${post.post_title}`);
+                addPostToLog(post);
+            });
+
+            // ✅ 새로운 댓글 알림
+            socket.on("newComment", (comment) => {
+                logMessage(`💬 <b>새 댓글:</b> ${comment.comment} (작성자: ${comment.user_email})`);
+                addCommentToLog(comment);
+            });
+
+            // ✅ 댓글 삭제 알림
+            socket.on("deletedComment", (comment) => {
+                logMessage(`❌ <b>댓글 삭제됨:</b> 댓글 ID ${comment.comment_id} (게시글 ID: ${comment.post_id})`);
+                removeCommentFromLog(comment.comment_id);
+            });
+
+            // ✅ 새로운 관리자 답변 알림
+            socket.on("newAnswer", (answer) => {
+                logMessage(`🔵 <b>관리자 답변 추가:</b> ${answer.ans_text}`);
+                addAnswerToLog(answer);
+            });
+
+            // ✅ 관리자 답변 삭제 알림
+            socket.on("deletedAnswer", (answer) => {
+                logMessage(`⚠️ <b>관리자 답변 삭제됨:</b> 답변 ID ${answer.answer_id} (게시글 ID: ${answer.post_id})`);
+                removeAnswerFromLog(answer.answer_id);
+            });
+
             // ✅ 연결 해제 이벤트
             socket.on("disconnect", () => {
-                logMessage("❌ Socket.IO 연결 종료");
+                logMessage("❌ <b>Socket.IO 연결 종료</b>");
             });
-    
+
             // ✅ 연결 오류 발생 시 처리
             socket.on("connect_error", (error) => {
-                logMessage("❌ Socket.IO 연결 오류 발생: " + error.message);
+                logMessage("❌ <b>Socket.IO 연결 오류 발생:</b> " + error.message);
                 console.error(error);
             });
+        }
+
+        function disconnectSocket() {
+            if (socket) {
+                socket.disconnect();
+                logMessage("❌ <b>수동으로 연결 종료</b>");
+            }
+        }
+
+        // ✅ 새로운 게시글을 로그에 추가
+        function addPostToLog(post) {
+            const logDiv = document.getElementById("log");
+            const newPostElement = document.createElement("div");
+            newPostElement.innerHTML = `
+                <h3>📝 ${post.post_title}</h3>
+                <p>${post.post_text}</p>
+                <small>작성자: ${post.user_email} | 시간: ${post.post_time}</small>
+                <hr>
+            `;
+            logDiv.prepend(newPostElement);  // 최신 게시글이 위로 오도록 추가
+        }
+
+        // ✅ 새로운 댓글을 로그에 추가
+        function addCommentToLog(comment) {
+            const logDiv = document.getElementById("log");
+            const newCommentElement = document.createElement("div");
+            newCommentElement.id = `comment-${comment.comment_id}`;
+            newCommentElement.innerHTML = `
+                <p>💬 <b>${comment.user_email}:</b> ${comment.comment} <small>(${comment.comment_date})</small></p>
+            `;
+            logDiv.prepend(newCommentElement);
+        }
+
+        // ✅ 댓글 삭제 시 로그에서 제거
+        function removeCommentFromLog(comment_id) {
+            const commentElement = document.getElementById(`comment-${comment_id}`);
+            if (commentElement) {
+                commentElement.remove();
+                logMessage(`🗑️ 댓글 ID ${comment_id}가 삭제됨`);
+            }
+        }
+
+        // ✅ 새로운 관리자 답변을 로그에 추가
+        function addAnswerToLog(answer) {
+            const logDiv = document.getElementById("log");
+            const newAnswerElement = document.createElement("div");
+            newAnswerElement.id = `answer-${answer.ans_id}`;
+            newAnswerElement.innerHTML = `
+                <p>🛠️ <b>관리자 답변:</b> ${answer.ans_text} <small>(${answer.ans_date})</small></p>
+            `;
+            logDiv.prepend(newAnswerElement);
+        }
+
+        // ✅ 관리자 답변 삭제 시 로그에서 제거
+        function removeAnswerFromLog(answer_id) {
+            const answerElement = document.getElementById(`answer-${answer_id}`);
+            if (answerElement) {
+                answerElement.remove();
+                logMessage(`🗑️ 관리자 답변 ID ${answer_id}가 삭제됨`);
+            }
         }
     </script>
 </body>

@@ -20,6 +20,7 @@ except Exception as e:
 
 # User input model
 class UserWeight(BaseModel):
+  sigungu: int
   region: str
   rd_slope_weight: float = 4.0
   acc_occ_weight: float = 3.0
@@ -28,13 +29,13 @@ class UserWeight(BaseModel):
 
 # ✅ 지역 지정
 @router.get("/get_district")
-def get_district(district: str, user: dict = Depends(get_authenticated_user)):
+def get_district(sigungu: int, district: str, user: dict = Depends(get_authenticated_user)):
   """Check if the district (읍면동) exists in road_info"""
   try:
     connection = get_connection()
     cursor = connection.cursor(dictionary=True)
-    query = "SELECT COUNT(*) AS count FROM road_info WHERE rds_rg = %s"
-    cursor.execute(query, (district,))
+    query = "SELECT COUNT(*) AS count FROM road_info WHERE sig_cd = %s and rds_rg = %s"
+    cursor.execute(query, (sigungu, district,))
     result = cursor.fetchone()
 
     if result["count"] == 0:
@@ -55,8 +56,8 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
     cursor = connection.cursor(dictionary=True)
 
     # 지역 필터링
-    query = "SELECT * FROM road_info WHERE rds_rg = %s"
-    cursor.execute(query, (input_data.region,))
+    query = "SELECT * FROM road_info WHERE sig_cd = %s and rds_rg = %s"
+    cursor.execute(query, (input_data.sigungu, input_data.region,))
     roads = cursor.fetchall()
 
     if not roads:
@@ -89,7 +90,7 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
 
     # Redis에 캐시 저장
     redis_key = f"recommendations:{user['sub']}:{input_data.region}"
-    redis_client.setex(redis_key, 600, recommended_roads_json)  # Cache for 10 minutes
+    redis_client.setex(redis_key, 900, recommended_roads_json)  # Cache for 15 minutes
 
     # JSON data로 저장 
     log_query = """
@@ -119,7 +120,7 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
 # ✅ 추천 로그 확인
 @router.get("/recommendations/log")
 def get_recommendation_logs(user: dict = Depends(get_authenticated_user)):
-  """log 확인용"""
+  """해당 id의 log 확인용"""
   try:
     connection = get_connection()
     cursor = connection.cursor(dictionary=True)
