@@ -76,11 +76,11 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
 
         with open(csv_filepath, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
-            writer.writerow(["road_id", "road_name", "rbp", "rep", "rd_slope", "acc_occ", "acc_sc", "pred_idx"])
+            writer.writerow(["road_id", "road_name", "rbp", "rep", "rd_slope", "acc_occ", "acc_sc", "rd_fr","pred_idx"])
             for road in recommended_roads:
                 writer.writerow([
                     road["road_id"], road["road_name"], road["rbp"], road["rep"],
-                    road["rd_slope"], road["acc_occ"], road["acc_sc"], road["pred_idx"]
+                    road["rd_slope"], road["acc_occ"], road["acc_sc"], road["rd_fr"], road["pred_idx"]
                 ])
 
         # 승인 메일 전송

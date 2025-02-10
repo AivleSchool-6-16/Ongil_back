@@ -1,59 +1,36 @@
+import pickle
+import numpy as np
+import joblib
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import MinMaxScaler
-from app.database.mysql_connect import get_connection
-from mysql.connector import Error
-from fastapi import HTTPException
 
-# 데이터 로드 함수
-def get_road_info(region: str):
-    """Fetch road information from the road_info table for a given region."""
+# 모델과 스케일러 로드 함수
+import os
+
+def load_model(model_path=None, scaler_path=None):
+    base_dir = os.path.dirname(os.path.abspath(__file__))  # 현재 파일(model.py)의 경로
+    
+    if model_path is None:
+        model_path = os.path.join(base_dir, "rf_model_best.pkl")
+    if scaler_path is None:
+        scaler_path = os.path.join(base_dir, "rf_scaler_best.pkl")
     try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
+        with open(model_path, 'rb') as f:
+            model = joblib.load(f)
+        with open(scaler_path, 'rb') as f:
+            scaler = joblib.load(f)
+        print("모델과 스케일러가 성공적으로 로드되었습니다.")
+        return model, scaler
+    except FileNotFoundError:
+        raise Exception("모델 또는 스케일러 파일을 찾을 수 없습니다.")
 
-        query = """
-            SELECT road_id, rds_id, road_cd, road_name, sig_cd, rds_rg, wdr_rd_cd, 
-                   rbp, rep, rd_slope, acc_occ, acc_sc 
-            FROM road_info 
-            WHERE rds_rg = %s
-        """
-        cursor.execute(query, (region,))
-        roads = cursor.fetchall()
+# 예측 함수
+def predict(model, scaler, input_data):
+    try:
+        # 입력 데이터를 DataFrame으로 변환하여 feature names 유지
+        X_input = pd.DataFrame([input_data], columns=scaler.feature_names_in_)
+        X_scaled = scaler.transform(X_input)  # 스케일 변환
 
-        if not roads:
-            raise HTTPException(status_code=404, detail=f"No road data found for region '{region}'.")
-
-        return roads
-
-    except Error as e:
-        print(f"Database error: {e}")
-        raise HTTPException(status_code=500, detail="Database query failed.")
-
-    finally:
-        if "cursor" in locals() and cursor:
-            cursor.close()
-        if "connection" in locals() and connection.is_connected():
-            connection.close()
-
-# 모델 학습 함수
-def train_model(data):
-    """
-    데이터로 모델을 학습하고 예측 점수를 계산.
-    """
-    # 입력 변수와 타겟 변수 정의
-    X = data[['RD_SLOPE', 'ACC_OCC', 'ACC_SC']]
-    y = (data['ACC_OCC'] * 3) + (data['ACC_SC'] * 3) + (data['RD_SLOPE'] * 4)
-
-    # 데이터 스케일링
-    scaler = MinMaxScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    # 모델 학습
-    model = RandomForestRegressor(random_state=42)
-    model.fit(X_scaled, y)
-
-    # 예측 점수 계산
-    data['예측점수'] = model.predict(X_scaled)
-
-    return data, model, scaler  # 데이터, 학습된 모델, 스케일러 반환
+        prediction = model.predict(X_scaled)  # 예측 실행
+        return prediction.tolist()[0]  # 단일 예측값 반환
+    except Exception as e:
+        return f"예측 중 오류 발생: {str(e)}"
