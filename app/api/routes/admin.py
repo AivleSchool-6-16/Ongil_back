@@ -64,10 +64,14 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
             raise HTTPException(status_code=404, detail="해당 요청을 찾을 수 없거나 이미 처리되었습니다.")
 
         user_email = request["user_email"]
-        recommended_roads = json.loads(request["recommended_roads"])
+        recommended_data = json.loads(request["recommended_roads"])
 
-        # CSV 파일 생성
-        csv_filename = f"road_recommendations_{log_id}.csv"
+        # rds_rg와 recommended_roads 추출
+        rds_rg = recommended_data["rds_rg"]
+        recommended_roads = recommended_data["recommended_roads"]
+
+        # CSV 파일명 설정 (동 이름 포함)
+        csv_filename = f"{rds_rg}_도로추천.csv"
         csv_filepath = f"./{csv_filename}"  # Temporary directory
 
         with open(csv_filepath, mode="w", newline="", encoding="utf-8") as file:
@@ -96,7 +100,8 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
     finally:
         cursor.close()
         connection.close()
-
+        
+        
 # ✅ 파일 거부
 @router.post("/file-requests/reject/{log_id}")
 def reject_file_request(log_id: int, user: dict = Depends(get_authenticated_user)):

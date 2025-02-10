@@ -51,70 +51,73 @@ def get_district(sigungu: int, district: str, user: dict = Depends(get_authentic
 # ✅ 열선 도로 추천
 @router.post("/recommend")
 def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authenticated_user)):
-  """가중치를 적용하여 추천 점수를 계산하고 json형식으로 로그 저장(상위10개)"""
-  try:
-    connection = get_connection()
-    cursor = connection.cursor(dictionary=True)
+    """가중치를 적용하여 추천 점수를 계산하고 json형식으로 로그 저장(상위10개)"""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
 
-    # 지역 필터링
-    query = "SELECT * FROM road_info WHERE sig_cd = %s and rds_rg = %s"
-    cursor.execute(query, (input_data.sigungu, input_data.region,))
-    roads = cursor.fetchall()
+        # 지역 필터링
+        query = "SELECT * FROM road_info WHERE sig_cd = %s and rds_rg = %s"
+        cursor.execute(query, (input_data.sigungu, input_data.region,))
+        roads = cursor.fetchall()
 
-    if not roads:
-      raise HTTPException(status_code=404, detail=f"'{input_data.region}'에 해당하는 도로 데이터가 없습니다.")
+        if not roads:
+            raise HTTPException(status_code=404, detail=f"'{input_data.region}'에 해당하는 도로 데이터가 없습니다.")
 
-    # user-defined weights 적용 
-    recommended_roads = []
-    for road in roads:
-      pred_idx = (
-          road["rd_slope"] * input_data.rd_slope_weight +
-          road["acc_occ"] * input_data.acc_occ_weight +
-          road["acc_sc"] * input_data.acc_sc_weight +
-          input_data.freezing_weight
-          
-      )
-      recommended_roads.append({
-        "road_id": road["road_id"],
-        "road_name": road["road_name"],
-        "rbp": road["rbp"],  # 시점
-        "rep": road["rep"],  # 종점
-        "rd_slope": road["rd_slope"],
-        "acc_occ": road["acc_occ"],
-        "acc_sc": road["acc_sc"],
-        "pred_idx": pred_idx
-      })
+        # user-defined weights 적용
+        recommended_roads = []
+        for road in roads:
+            pred_idx = (
+                road["rd_slope"] * input_data.rd_slope_weight +
+                road["acc_occ"] * input_data.acc_occ_weight +
+                road["acc_sc"] * input_data.acc_sc_weight +
+                input_data.freezing_weight
+            )
+            recommended_roads.append({
+                "road_id": road["road_id"],
+                "road_name": road["road_name"],
+                "rbp": road["rbp"],  # 시점
+                "rep": road["rep"],  # 종점
+                "rd_slope": road["rd_slope"],
+                "acc_occ": road["acc_occ"],
+                "acc_sc": road["acc_sc"],
+                "pred_idx": pred_idx
+            })
 
-    # 상위 10개 
-    recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"],reverse=True)[:10]
+        # 상위 10개
+        recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"], reverse=True)[:10]
 
-    # Convert list to JSON format
-    recommended_roads_json = json.dumps(recommended_roads, ensure_ascii=False)
+        # 지역 저장 후 JSON format으로 변경 
+        response_data = {
+            "rds_rg": input_data.region,
+            "recommended_roads": recommended_roads
+        }
+        recommended_roads_json = json.dumps(response_data, ensure_ascii=False)
 
-    # Redis에 캐시 저장
-    redis_key = f"recommendations:{user['sub']}:{input_data.region}"
-    redis_client.setex(redis_key, 900, recommended_roads_json)  # Cache for 15 minutes
+        # Redis에 캐시 저장
+        redis_key = f"recommendations:{user['sub']}:{input_data.region}"
+        redis_client.setex(redis_key, 900, recommended_roads_json)  # Cache for 15 minutes
 
-    # JSON data로 저장 
-    log_query = """
-        INSERT INTO rec_road_log (user_email, recommended_roads)
-        VALUES (%s, %s)
+        # JSON data로 저장
+        log_query = """
+            INSERT INTO rec_road_log (user_email, recommended_roads)
+            VALUES (%s, %s)
         """
-    cursor.execute(log_query, (user["sub"], recommended_roads_json))
-    connection.commit()
+        cursor.execute(log_query, (user["sub"], recommended_roads_json))
+        connection.commit()
 
-    return {
-        "user_weights": {
-            "rd_slope_weight": input_data.rd_slope_weight,
-            "acc_occ_weight": input_data.acc_occ_weight,
-            "acc_sc_weight": input_data.acc_sc_weight,
-            "freezing_weight": input_data.freezing_weight
-        },
-        "recommended_roads": recommended_roads
-    }
-  finally:
-    cursor.close()
-    connection.close()
+        return {
+            "user_weights": {
+                "rd_slope_weight": input_data.rd_slope_weight,
+                "acc_occ_weight": input_data.acc_occ_weight,
+                "acc_sc_weight": input_data.acc_sc_weight,
+                "freezing_weight": input_data.freezing_weight
+            },
+            "recommended_roads": recommended_roads
+        }
+    finally:
+        cursor.close()
+        connection.close()
 
 
 # ✅ 추천 로그 확인
@@ -162,7 +165,7 @@ def request_road_file(user: dict = Depends(get_authenticated_user)):
 
         log_id = log_entry[0]  # 가장 최근 log_id 추출
 
-        # ask_check 0 -> 1로 업데이트
+        # ask_check -> 1로 업데이트
         update_query = "UPDATE rec_road_log SET ask_check = 1 WHERE log_id = %s"
         cursor.execute(update_query, (log_id,))
         connection.commit()
