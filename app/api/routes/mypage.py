@@ -155,26 +155,26 @@ def delete_user(token: str = Header()):
         if not user_email:
             raise HTTPException(status_code=400, detail="Invalid token payload.")
 
-        # 1️. file_metadata, answer, comments 삭제 (Posts 참조)
-        related_tables_first = ["file_metadata", "answer", "comments"]
-        
-        for table in related_tables_first:
-            query_delete = f"DELETE FROM `{table}` WHERE post_id IN (SELECT post_id FROM Posts WHERE user_email = %s)"
-            execute_query(query_delete, (user_email,))
+        connection = get_connection()
+        cursor = connection.cursor()
 
-        # 2️. Posts 삭제
+        # 1️⃣ user_email을 참조하는 테이블 먼저 삭제 (comments 등)
+        execute_query("DELETE FROM comments WHERE user_email = %s", (user_email,))
+        execute_query("DELETE FROM answer WHERE user_email = %s", (user_email,))
+        execute_query("DELETE FROM file_metadata WHERE user_email = %s", (user_email,))
+
+        # 2️⃣ Posts 삭제
         execute_query("DELETE FROM Posts WHERE user_email = %s", (user_email,))
 
-        # 3️. user_email 관련 테이블 삭제
-        related_tables_second = ["log", "permissions", "rec_road_log"]
-        
-        for table in related_tables_second:
-            execute_query(f"DELETE FROM `{table}` WHERE user_email = %s", (user_email,))
+        # 3️⃣ user_email 관련 테이블 삭제
+        execute_query("DELETE FROM log WHERE user_email = %s", (user_email,))
+        execute_query("DELETE FROM permissions WHERE user_email = %s", (user_email,))
+        execute_query("DELETE FROM rec_road_log WHERE user_email = %s", (user_email,))
 
-        # 4️. user_data 삭제
+        # 4️⃣ user_data 삭제
         execute_query("DELETE FROM user_data WHERE user_email = %s", (user_email,))
 
-        # 5️. 토큰을 블랙리스트에 추가 
+        # 5️⃣ 토큰을 블랙리스트에 추가 
         expiration_time = payload.get("exp")
         current_time = datetime.now(timezone.utc).timestamp()
         remaining_time = max(int(expiration_time - current_time), 0)
@@ -191,3 +191,7 @@ def delete_user(token: str = Header()):
             status_code=500,
             detail=f"회원 탈퇴에 실패하였습니다. Error: {str(e)}"
         )
+
+    finally:
+        cursor.close()
+        connection.close()
