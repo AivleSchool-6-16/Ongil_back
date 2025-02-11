@@ -9,6 +9,8 @@ import pandas as pd
 from app.core.jwt_utils import get_authenticated_user
 from app.database.mysql_connect import get_connection
 from app.models.model import load_model, predict
+from app.api.socket import run_model_with_progress
+import asyncio 
 
 
 router = APIRouter()
@@ -54,10 +56,12 @@ def get_district(sigungu: int, district: str, user: dict = Depends(get_authentic
 
 # ✅ 열선 도로 추천
 @router.post("/recommend")
-def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authenticated_user)):
+async def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authenticated_user)):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
+        
+        asyncio.create_task(run_model_with_progress(user["sub"]))
 
         # 1. 필요한 데이터만 가져오고, 쿼리 속도 향상을 위해 인덱스 활용
         query = """
@@ -179,4 +183,3 @@ def request_road_file(user: dict = Depends(get_authenticated_user)):
     finally:
         cursor.close()
         connection.close()
-

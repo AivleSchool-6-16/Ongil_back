@@ -1,6 +1,8 @@
 import socketio
+import asyncio
 from urllib.parse import parse_qs
 from app.core.jwt_utils import verify_token  # Import JWT verification function
+
 
 # ✅ Create WebSocket Server
 sio = socketio.AsyncServer(
@@ -11,7 +13,7 @@ sio = socketio.AsyncServer(
 )
 socket_app = socketio.ASGIApp(sio)
 
-# 실시간 게시판 데이터 저장 (임시)
+# 실시간 게시판 데이터 저장 
 active_connections = []
 
 # 1. WebSocket 연결 관리
@@ -104,3 +106,25 @@ async def notify_deleted_answer(answer):
     
 # 모델 진행률 보내기
 
+# ✅ 모델 진행률을 웹소켓으로 보내는 함수 추가
+async def send_progress(progress: int, user_id: str):
+    """
+    모델 진행률을 특정 사용자에게 전송
+    :param progress: 진행률 (0~100)
+    :param user_id: 사용자 ID (토큰에서 가져옴)
+    """
+    print(f"📡 [Socket.IO] 모델 진행률 전송: {progress}% (User: {user_id})")
+    await sio.emit("progressUpdate", {"progress": progress, "user_id": user_id})
+
+
+# ✅ 모델 실행 중 진행률을 전송하는 함수
+async def run_model_with_progress(user_id: str):
+    """
+    모델을 실행하면서 진행률을 실시간으로 업데이트
+    :param user_id: 진행률을 받을 사용자 ID
+    """
+    for progress in range(0, 101, 10):  # 0% ~ 100% (10% 단위 증가)
+        await send_progress(progress, user_id)
+        await asyncio.sleep(1)  # 1초마다 진행률 업데이트 (예제)
+
+    print(f"[Socket.IO] 모델 실행 완료! (User: {user_id})")
