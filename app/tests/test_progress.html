@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.IO WebSocket 테스트</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #log {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        #progress-container {
+            margin-top: 20px;
+            width: 100%;
+            background-color: #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+            height: 30px;
+            position: relative;
+        }
+        #progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            font-weight: bold;
+            transition: width 0.5s;
+        }
+    </style>
+</head>
+<body>
+    <h1>Socket.IO WebSocket 테스트</h1>
+    <button onclick="connectSocket()">🔗 Socket.IO 연결</button>
+    <button onclick="disconnectSocket()">❌ 연결 종료</button>
+    
+    <h2>모델 진행률</h2>
+    <div id="progress-container">
+        <div id="progress-bar">0%</div>
+    </div>
+
+    <h2>로그</h2>
+    <div id="log"></div>
+
+    <script>
+        let socket;
+    
+        function logMessage(message) {
+            document.getElementById("log").innerHTML += `<p>${message}</p>`;
+        }
+
+        function connectSocket() {
+            const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlamppMDAwMUBnbWFpbC5jb20iLCJhZG1pbiI6MSwiZXhwIjoxNzM5MjkyNjczfQ._GU-5KWIj4qZutTfgpYbPJ-zAT3GPQa3kIJ9fCvAmYU";
+
+            // ✅ FastAPI Socket.IO 서버에 연결
+            socket = io("http://localhost:8000", {
+                path: "/socket.io",
+                transports: ["websocket"],
+                query: { token: token }
+            });
+
+            // ✅ 연결 성공
+            socket.on("connect", () => {
+                logMessage(`✅ <b>Socket.IO 연결 성공!</b> (ID: ${socket.id})`);
+            });
+
+            // ✅ 모델 진행률 업데이트 이벤트
+            socket.on("progressUpdate", (data) => {
+                updateProgressBar(data.progress);
+                logMessage(`⏳ <b>모델 진행률:</b> ${data.progress}%`);
+            });
+
+            // ✅ 서버에서 메시지를 받을 때 실행
+            socket.on("message", (data) => {
+                logMessage(`📩 <b>서버 메시지:</b> ${JSON.stringify(data)}`);
+            });
+
+            // ✅ 연결 해제 이벤트
+            socket.on("disconnect", () => {
+                logMessage("❌ <b>Socket.IO 연결 종료</b>");
+            });
+
+            // ✅ 연결 오류 발생 시 처리
+            socket.on("connect_error", (error) => {
+                logMessage("❌ <b>Socket.IO 연결 오류 발생:</b> " + error.message);
+                console.error(error);
+            });
+        }
+
+        function disconnectSocket() {
+            if (socket) {
+                socket.disconnect();
+                logMessage("❌ <b>수동으로 연결 종료</b>");
+            }
+        }
+
+        // ✅ 진행률 바 업데이트
+        function updateProgressBar(progress) {
+            const progressBar = document.getElementById("progress-bar");
+            progressBar.style.width = progress + "%";
+            progressBar.textContent = progress + "%";
+
+            // 100% 완료 시 성공 메시지 추가
+            if (progress === 100) {
+                logMessage("✅ <b>모델 실행 완료!</b>");
+            }
+        }
+    </script>
+</body>
+</html>
