@@ -35,21 +35,21 @@ class UserWeight(BaseModel):
 # ✅ 지역 지정
 @router.get("/get_district")
 def get_district(sigungu: int, district: str, user: dict = Depends(get_authenticated_user)):
-  """Check if the district (읍면동) exists in road_info"""
-  try:
-    connection = get_connection()
-    cursor = connection.cursor(dictionary=True)
-    query = "SELECT COUNT(*) AS count FROM road_info WHERE sig_cd = %s and rds_rg = %s"
-    cursor.execute(query, (sigungu, district,))
-    result = cursor.fetchone()
+    """road_info에 읍/면/동/가 있는지 확인"""
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        query = "SELECT 1 FROM road_info WHERE sig_cd = %s AND rds_rg = %s LIMIT 1"
+        cursor.execute(query, (sigungu, district,))
+        result = cursor.fetchone()
 
-    if result["count"] == 0:
-      raise HTTPException(status_code=404, detail=f"'{district}' 지역의 도로 정보가 없습니다.")
+        if not result:
+            raise HTTPException(status_code=404, detail=f"'{district}' 지역의 도로 정보가 없습니다.")
 
-    return {"message": f"'{district}' 지역이 선택되었습니다."}
-  finally:
-    cursor.close()
-    connection.close()
+        return {"message": f"'{district}' 지역이 선택되었습니다."}
+    finally:
+        cursor.close()
+        connection.close()
 
 
 # ✅ 열선 도로 추천
