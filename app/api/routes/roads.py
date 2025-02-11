@@ -59,7 +59,7 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # 🚀 1️⃣ 필요한 데이터만 가져오고, 쿼리 속도 향상을 위해 인덱스 활용
+        # 1. 필요한 데이터만 가져오고, 쿼리 속도 향상을 위해 인덱스 활용
         query = """
         SELECT rds_id, road_name, rbp, rep, rd_slope, acc_occ, acc_sc, rd_fr 
         FROM road_info 
@@ -71,14 +71,14 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
         if not roads:
             raise HTTPException(status_code=404, detail=f"'{input_data.region}'에 해당하는 도로 데이터가 없습니다.")
 
-        # 🚀 2️⃣ 리스트를 DataFrame으로 변환하여 벡터 연산 최적화
+        # 2. 리스트를 DataFrame으로 변환하여 벡터 연산 최적화
         df = pd.DataFrame(roads)
 
-        # 🚀 3️⃣ 모델 예측을 벡터 연산으로 수행 (predict가 벡터 입력을 지원해야 함)
+        # 3. 모델 예측을 벡터 연산으로 수행 (predict가 벡터 입력을 지원해야 함)
         feature_array = df[['rd_slope', 'acc_occ', 'acc_sc', 'rd_fr']].values
         df["예측점수"] = predict(model, scaler, feature_array)  # ✅ 벡터 연산
 
-        # 🚀 4️⃣ 사용자 가중치를 적용하여 pred_idx 계산
+        # 4. 사용자 가중치를 적용하여 pred_idx 계산
         df["pred_idx"] = (
             df["예측점수"] * 0.3 +
             df["rd_slope"] * input_data.rd_slope_weight +
@@ -87,24 +87,28 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
             df["rd_fr"] * input_data.rd_fr_weight
         )
 
-        # 🚀 5️⃣ 정규화 처리 (벡터 연산)
+        # 5. 정규화 처리 (벡터 연산)
         min_score, max_score = df["pred_idx"].min(), df["pred_idx"].max()
         if max_score - min_score > 0:
             df["pred_idx"] = ((df["pred_idx"] - min_score) / (max_score - min_score)) * 100
         else:
             df["pred_idx"] = 50  # 모든 값이 동일하면 50으로 설정
 
-        # 🚀 6️⃣ 상위 10개만 선택하여 반환
+        # 6. 상위 10개만 선택하여 반환
         recommended_roads = df.sort_values("pred_idx", ascending=False).head(10).to_dict(orient="records")
 
-        # 🚀 7️⃣ Redis 캐싱 적용
-        response_data = {"rds_rg": input_data.region, "recommended_roads": recommended_roads}
+        # 7. Redis 캐싱 적용
+        response_data = {
+            "rds_rg": input_data.region,
+            "recommended_roads": recommended_roads
+        }
+        recommended_roads_json = json.dumps(response_data, ensure_ascii=False)
         redis_key = f"recommendations:{user['sub']}:{input_data.region}"
-        redis_client.setex(redis_key, 900, json.dumps(response_data, ensure_ascii=False))
+        redis_client.setex(redis_key, 900, recommended_roads_json)
 
-        # 🚀 8️⃣ 추천 결과 로그 저장 (비동기 처리 가능)
+        # 8. 추천 결과 로그 저장 (비동기 처리 가능)
         log_query = "INSERT INTO rec_road_log (user_email, recommended_roads) VALUES (%s, %s)"
-        cursor.execute(log_query, (user["sub"], json.dumps(recommended_roads, ensure_ascii=False)))
+        cursor.execute(log_query, (user["sub"], recommended_roads_json))
         connection.commit()
 
         return {
