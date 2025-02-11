@@ -55,82 +55,56 @@ def get_district(sigungu: int, district: str, user: dict = Depends(get_authentic
 # ✅ 열선 도로 추천
 @router.post("/recommend")
 def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authenticated_user)):
-    """
-    사용자 입력을 받아 도로 추천을 수행하는 API
-    """
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # 지역 필터링
-        query = "SELECT * FROM road_info WHERE sig_cd = %s AND rds_rg = %s"
-        cursor.execute(query, (input_data.sigungu, input_data.region,))
+        # 🚀 1️⃣ 필요한 데이터만 가져오고, 쿼리 속도 향상을 위해 인덱스 활용
+        query = """
+        SELECT rds_id, road_name, rbp, rep, rd_slope, acc_occ, acc_sc, rd_fr 
+        FROM road_info 
+        WHERE sig_cd = %s AND rds_rg = %s
+        """
+        cursor.execute(query, (input_data.sigungu, input_data.region))
         roads = cursor.fetchall()
 
         if not roads:
             raise HTTPException(status_code=404, detail=f"'{input_data.region}'에 해당하는 도로 데이터가 없습니다.")
 
-        # 모델 예측 수행 (DataFrame이 아니므로 직접 반복문 사용)
-        for road in roads:
-            road["예측점수"] = predict(model, scaler, [road["rd_slope"], road["acc_occ"], road["acc_sc"], road["rd_fr"]])
+        # 🚀 2️⃣ 리스트를 DataFrame으로 변환하여 벡터 연산 최적화
+        df = pd.DataFrame(roads)
 
-        # user-defined weights 적용
-        pred_idx_list = []
-        recommended_roads = []
+        # 🚀 3️⃣ 모델 예측을 벡터 연산으로 수행 (predict가 벡터 입력을 지원해야 함)
+        feature_array = df[['rd_slope', 'acc_occ', 'acc_sc', 'rd_fr']].values
+        df["예측점수"] = predict(model, scaler, feature_array)  # ✅ 벡터 연산
 
-        for road in roads:
-            pred_idx = (
-                road["예측점수"] * 0.3 +
-                road["rd_slope"] * input_data.rd_slope_weight +
-                road["acc_occ"] * input_data.acc_occ_weight +
-                road["acc_sc"] * input_data.acc_sc_weight +
-                road["rd_fr"] * input_data.rd_fr_weight
-            )
-            pred_idx_list.append(pred_idx)
-            road["pred_idx"] = pred_idx
+        # 🚀 4️⃣ 사용자 가중치를 적용하여 pred_idx 계산
+        df["pred_idx"] = (
+            df["예측점수"] * 0.3 +
+            df["rd_slope"] * input_data.rd_slope_weight +
+            df["acc_occ"] * input_data.acc_occ_weight +
+            df["acc_sc"] * input_data.acc_sc_weight +
+            df["rd_fr"] * input_data.rd_fr_weight
+        )
 
-        # 예측 점수 정규화
-        min_score = min(pred_idx_list) if pred_idx_list else 0
-        max_score = max(pred_idx_list) if pred_idx_list else 100
+        # 🚀 5️⃣ 정규화 처리 (벡터 연산)
+        min_score, max_score = df["pred_idx"].min(), df["pred_idx"].max()
+        if max_score - min_score > 0:
+            df["pred_idx"] = ((df["pred_idx"] - min_score) / (max_score - min_score)) * 100
+        else:
+            df["pred_idx"] = 50  # 모든 값이 동일하면 50으로 설정
 
-        for road in roads:
-            if max_score - min_score > 0:
-                road["pred_idx"] = ((road["pred_idx"] - min_score) / (max_score - min_score)) * 100
-            else:
-                road["pred_idx"] = 50  # 모든 값이 같다면 50으로 설정
+        # 🚀 6️⃣ 상위 10개만 선택하여 반환
+        recommended_roads = df.sort_values("pred_idx", ascending=False).head(10).to_dict(orient="records")
 
-            recommended_roads.append({
-                "road_id": road["rds_id"],
-                "road_name": road["road_name"],
-                "rbp": road["rbp"],  # 시점
-                "rep": road["rep"],  # 종점
-                "rd_slope": road["rd_slope"],
-                "acc_occ": road["acc_occ"],
-                "acc_sc": road["acc_sc"],
-                "rd_fr": road["rd_fr"],
-                "pred_idx": road["pred_idx"]
-            })
-
-        # 상위 10개 추천
-        recommended_roads = sorted(recommended_roads, key=lambda x: x["pred_idx"], reverse=True)[:10]
-
-        # 지역 저장 후 JSON format으로 변환
-        response_data = {
-            "rds_rg": input_data.region,
-            "recommended_roads": recommended_roads
-        }
-        recommended_roads_json = json.dumps(response_data, ensure_ascii=False)
-
-        # Redis에 캐시 저장 (15분 TTL)
+        # 🚀 7️⃣ Redis 캐싱 적용
+        response_data = {"rds_rg": input_data.region, "recommended_roads": recommended_roads}
         redis_key = f"recommendations:{user['sub']}:{input_data.region}"
-        redis_client.setex(redis_key, 900, recommended_roads_json)
+        redis_client.setex(redis_key, 900, json.dumps(response_data, ensure_ascii=False))
 
-        # 추천 결과 로그 저장
-        log_query = """
-            INSERT INTO rec_road_log (user_email, recommended_roads)
-            VALUES (%s, %s)
-        """
-        cursor.execute(log_query, (user["sub"], recommended_roads_json))
+        # 🚀 8️⃣ 추천 결과 로그 저장 (비동기 처리 가능)
+        log_query = "INSERT INTO rec_road_log (user_email, recommended_roads) VALUES (%s, %s)"
+        cursor.execute(log_query, (user["sub"], json.dumps(recommended_roads, ensure_ascii=False)))
         connection.commit()
 
         return {
@@ -145,6 +119,7 @@ def road_recommendations(input_data: UserWeight, user: dict = Depends(get_authen
     finally:
         cursor.close()
         connection.close()
+        
 
 # ✅ 추천 로그 확인
 @router.get("/recommendations/log")
