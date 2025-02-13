@@ -4,6 +4,7 @@ from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
 import redis
 import json
+import os
 from mysql.connector import Error
 from app.database.mysql_connect import get_connection
 from app.core.security import hash_password, verify_password
@@ -158,56 +159,59 @@ def signup_send_code(request: SignUpRequest):
 # 3. 이메일 인증 확인
 @router.get("/signup/confirm")
 def confirm_email(token: str = Query(...)):
-  """
-  이메일 인증 완료 시 해싱된 비밀번호 포함 사용자 정보를 DB에 저장 후 로그인 페이지로 리디렉트\n
-  """
-  try:
-    payload = verify_token(token)
-    email = payload.get("sub")
-
-    if not email:
-      return RedirectResponse(url="/signup/error?error_type=invalid_token")
-
-    # 이미 이메일이 있다면 
-    if find_user_by_email(email):
-      return RedirectResponse(url="localhost:5173/")
-
-    # 레디스에서 확인 
-    user_data_json = redis_client.get(f"signup_data:{email}")
-    if not user_data_json:
-      return RedirectResponse(url="/signup/error?error_type=missing_info")
-
-    user_data = json.loads(user_data_json)
-
+    """
+    이메일 인증 완료 시 해싱된 비밀번호 포함 사용자 정보를 DB에 저장 후,
+    (원하는 프론트엔드 도메인으로) 리디렉트하며 토큰도 넘긴다.
+    """
     try:
-      connection = get_connection()
-      cursor = connection.cursor()
-      query = """
-            INSERT INTO user_data (user_email, user_ps, user_name, jurisdiction, user_dept)
-            VALUES (%s, %s, %s, %s, %s)
+        payload = verify_token(token)
+        email = payload.get("sub")
+
+        if not email:
+            return RedirectResponse(url="/signup/error?error_type=invalid_token")
+
+        # 이미 이메일이 있다면
+        if find_user_by_email(email):
+            # 여기서 토큰도 넘기고 싶다면
+            return RedirectResponse(url="https://ongil.vercel.app")
+
+        # 레디스에서 확인
+        user_data_json = redis_client.get(f"signup_data:{email}")
+        if not user_data_json:
+            return RedirectResponse(url="/signup/error?error_type=missing_info")
+
+        user_data = json.loads(user_data_json)
+
+        # DB에 user_data 저장
+        try:
+            connection = get_connection()
+            cursor = connection.cursor()
+            query = """
+                INSERT INTO user_data (user_email, user_ps, user_name, jurisdiction, user_dept)
+                VALUES (%s, %s, %s, %s, %s)
             """
-      values = (
-        user_data["email"],
-        user_data["password"],  # 이미 암호화된 상태
-        user_data["name"],
-        user_data["jurisdiction"],
-        user_data["department"]
-      )
-      cursor.execute(query, values)
-      connection.commit()
-    finally:
-      if connection.is_connected():
-        cursor.close()
-        connection.close()
+            values = (
+                user_data["email"],
+                user_data["password"],  # 이미 암호화된 상태
+                user_data["name"],
+                user_data["jurisdiction"],
+                user_data["department"]
+            )
+            cursor.execute(query, values)
+            connection.commit()
+        finally:
+            if connection.is_connected():
+                cursor.close()
+                connection.close()
 
-    # 레디스에서 user data 삭제 
-    redis_client.delete(f"signup_data:{email}")
+        # 레디스에서 user data 삭제
+        redis_client.delete(f"signup_data:{email}")
 
-    # 로그인 페이지로 리디렉션 
-    return RedirectResponse(url="localhost:5173/")
+        # 인증 완료 후 프론트엔드로 리디렉션
+        return RedirectResponse(url="https://ongil.vercel.app")
 
-  except Exception:
-    return RedirectResponse(url="/signup/error?error_type=unknown")
+    except Exception:
+        return RedirectResponse(url="/signup/error?error_type=unknown")
 
 
 # 3-1. 회원가입 인증 에러 
@@ -252,7 +256,7 @@ def login_user(request: LoginRequest):
         raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
 
     is_admin_user = is_admin(request.email)
-    access_token = create_access_token(data={"sub": request.email, "admin": is_admin_user}, expires_delta=timedelta(hours=12))
+    access_token = create_access_token(data={"sub": request.email, "admin": is_admin_user}, expires_delta=timedelta(hours=2))
     refresh_token = create_refresh_token(data={"sub": request.email}, expires_delta=timedelta(days=7))
 
     return {
