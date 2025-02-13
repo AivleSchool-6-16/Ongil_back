@@ -1,4 +1,4 @@
-# 문의 - 사용하지 않음
+# 문의 - 현재는 사용하지 않음
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from datetime import datetime

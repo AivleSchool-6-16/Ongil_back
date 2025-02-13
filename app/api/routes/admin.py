@@ -7,7 +7,7 @@ import json
 import os
 from app.core.jwt_utils import get_authenticated_user
 from app.database.mysql_connect import get_connection
-from app.core.email_utils import send_file_email
+from app.core.email_utils import send_email
 from app.api.socket import *
 
 router = APIRouter()
@@ -86,7 +86,7 @@ def approve_file_request(log_id: int, user: dict = Depends(get_authenticated_use
         # 승인 메일 전송
         email_subject = "도로 추천 결과 파일"
         email_body = f"{user_email}님,\n\n도로 추천 결과 파일을 첨부합니다."
-        send_file_email(to_email=user_email, subject=email_subject, body=email_body, attachment_path=csv_filepath)
+        send_email(to_email=user_email, subject=email_subject, body=email_body, attachment_path=csv_filepath)
 
         # 파일 삭제
         os.remove(csv_filepath)
@@ -125,7 +125,7 @@ def reject_file_request(log_id: int, user: dict = Depends(get_authenticated_user
         # 거부 메일 전송
         email_subject = "파일 요청이 거부되었습니다."
         email_body = f"{user_email}님,\n\n요청하신 도로 추천 파일이 거부되었습니다. 추가 문의는 관리자에게 연락하세요."
-        send_file_email(to_email=user_email, subject=email_subject, body=email_body)
+        send_email(to_email=user_email, subject=email_subject, body=email_body)
 
         # approve 상태를 0으로 변경
         update_query = "UPDATE rec_road_log SET approve = 0 WHERE log_id = %s"

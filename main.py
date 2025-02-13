@@ -1,18 +1,17 @@
 from fastapi import FastAPI, Request, HTTPException, Depends, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
+
 from app.api.routes import admin, auth, board, mypage, roads
 from app.core.token_blacklist import is_token_blacklisted
 from app.core.jwt_utils import verify_token
 from app.services.sync_views import sync_redis_to_mysql
-from fastapi.exceptions import RequestValidationError
-from starlette.responses import JSONResponse
 from app.api.socket import socket_app
 
 # ✅ MySQL 연결 설정

@@ -4,7 +4,6 @@ from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
 import redis
 import json
-import os
 from mysql.connector import Error
 from app.database.mysql_connect import get_connection
 from app.core.security import hash_password, verify_password
@@ -172,7 +171,6 @@ def confirm_email(token: str = Query(...)):
 
         # 이미 이메일이 있다면
         if find_user_by_email(email):
-            # 여기서 토큰도 넘기고 싶다면
             return RedirectResponse(url="https://ongil.vercel.app")
 
         # 레디스에서 확인
@@ -204,10 +202,10 @@ def confirm_email(token: str = Query(...)):
                 cursor.close()
                 connection.close()
 
-        # 레디스에서 user data 삭제
+        # 레디스에서 데이터 삭제
         redis_client.delete(f"signup_data:{email}")
 
-        # 인증 완료 후 프론트엔드로 리디렉션
+        # 인증 완료 후 로그인 리디렉션
         return RedirectResponse(url="https://ongil.vercel.app")
 
     except Exception:
@@ -245,7 +243,7 @@ def signup_error(error_type: str = Query("unknown")):
     """, status_code=400)
 
 
-# 로그인 
+# ✅ 로그인 
 @router.post("/login")
 def login_user(request: LoginRequest):
     user = find_user_by_email(request.email)
@@ -266,7 +264,7 @@ def login_user(request: LoginRequest):
         "is_admin": is_admin_user
     }
 
-# 로그아웃 
+# ✅ 로그아웃 
 @router.post("/logout")
 def logout(request: LogoutRequest):
     payload = verify_token(request.token)

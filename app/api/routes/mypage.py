@@ -1,12 +1,11 @@
 # mypage - 정보 조회, 수정, 탈퇴 
 from fastapi import APIRouter, HTTPException, Header, status, Depends
-from pydantic import EmailStr, field_validator
 from datetime import datetime, timezone
 import traceback
 import mysql
 from typing import Dict
 from app.core.security import verify_password, hash_password
-from app.core.jwt_utils import verify_token, get_authenticated_user
+from app.core.jwt_utils import verify_token
 from app.core.token_blacklist import is_token_blacklisted, add_token_to_blacklist
 from app.database.mysql_connect import get_connection
 
@@ -158,23 +157,23 @@ def delete_user(token: str = Header()):
         connection = get_connection()
         cursor = connection.cursor()
 
-        # 1️⃣ user_email을 참조하는 테이블 먼저 삭제 (comments 등)
+        # 1️. user_email을 참조하는 테이블 먼저 삭제 (comments 등)
         execute_query("DELETE FROM comments WHERE user_email = %s", (user_email,))
         execute_query("DELETE FROM answer WHERE user_email = %s", (user_email,))
         execute_query("DELETE FROM file_metadata WHERE user_email = %s", (user_email,))
 
-        # 2️⃣ Posts 삭제
+        # 2️. Posts 삭제
         execute_query("DELETE FROM Posts WHERE user_email = %s", (user_email,))
 
-        # 3️⃣ user_email 관련 테이블 삭제
+        # 3️. user_email 관련 테이블 삭제
         execute_query("DELETE FROM log WHERE user_email = %s", (user_email,))
         execute_query("DELETE FROM permissions WHERE user_email = %s", (user_email,))
         execute_query("DELETE FROM rec_road_log WHERE user_email = %s", (user_email,))
 
-        # 4️⃣ user_data 삭제
+        # 4️. user_data 삭제
         execute_query("DELETE FROM user_data WHERE user_email = %s", (user_email,))
 
-        # 5️⃣ 토큰을 블랙리스트에 추가 
+        # 5️. 토큰을 블랙리스트에 추가 
         expiration_time = payload.get("exp")
         current_time = datetime.now(timezone.utc).timestamp()
         remaining_time = max(int(expiration_time - current_time), 0)

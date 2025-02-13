@@ -1,6 +1,7 @@
 import redis
 from app.database.mysql_connect import get_connection
 
+# 조회수 동기화 
 def sync_redis_to_mysql():
     connection = get_connection()
     cursor = connection.cursor()
@@ -10,7 +11,7 @@ def sync_redis_to_mysql():
         keys = redis_client.keys("post_views:*")
 
         for key in keys:
-            post_id = int(key.split(":")[1])  # Extract post_id from key
+            post_id = int(key.split(":")[1])  # key에서 post_id 추출하기 
             redis_views = int(redis_client.get(key))
 
             if redis_views > 0:  # redis에 조회수가 추가되었다면 
@@ -21,7 +22,7 @@ def sync_redis_to_mysql():
                 )
                 connection.commit()
 
-                # Reset Redis view count 
+                # 리셋 redis 
                 redis_client.delete(key)
 
         print("Sync completed successfully!")

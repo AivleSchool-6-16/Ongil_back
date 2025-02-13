@@ -1,7 +1,5 @@
 import random
 import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from email.message import EmailMessage
 import os
 
@@ -42,11 +40,6 @@ def send_email(to_email: str, subject: str, body: str, is_html: bool = False, at
     except Exception as e:
         print(f"❌ Failed to send email: {e}")
     return False
-
-
-def send_file_email(to_email: str, subject: str, body: str, is_html: bool = False, attachment_path: str = None):
-    """파일 첨부 이메일 전송"""
-    return send_email(to_email, subject, body, is_html=is_html, attachment_path=attachment_path)
 
 
 def generate_verification_code():
