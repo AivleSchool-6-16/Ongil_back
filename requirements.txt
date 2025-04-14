@@ -24,6 +24,7 @@ frozenlist==1.5.0
 greenlet==3.1.1
 h11==0.14.0
 httptools==0.6.4
+httpx==0.24.0
 idna==3.10
 iniconfig==2.1.0
 ipykernel==6.25.2
@@ -57,11 +58,10 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 python-engineio==4.11.2
 python-jose==3.3.0
-python-magic-bin==0.4.14
+python-magic==0.4.24
 python-multipart==0.0.20
 python-socketio==5.12.1
 pytz==2024.2
-pywin32==306
 PyYAML==6.0.2
 pyzmq==25.1.1
 redis==4.3.4

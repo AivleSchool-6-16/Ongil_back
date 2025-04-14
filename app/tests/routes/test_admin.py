@@ -67,7 +67,6 @@ def fake_send_email(to_email, subject, body, attachment_path=None):
 
 # monkeypatch로 email 전송 함수 오버라이드
 # admin.py에서 send_email은 "from app.core.email_utils import send_email"로 임포트 되어 있음
-# 따라서, "app.api.routes.admin.send_email" 경로로 오버라이드 할 수 있습니다.
 @pytest.fixture(autouse=True)
 def override_send_email(monkeypatch):
     monkeypatch.setattr("app.api.routes.admin.send_email", fake_send_email)
@@ -98,7 +97,7 @@ def test_get_file_requests(monkeypatch):
     # admin.py 내의 get_connection을 오버라이드
     monkeypatch.setattr("app.api.routes.admin.get_connection", fake_get_connection)
 
-    response = client.get("/file-requests")
+    response = client.get("/admin/file-requests")
     assert response.status_code == 200
     data = response.json()
     assert "file_requests" in data
@@ -146,7 +145,7 @@ def test_approve_file_request(monkeypatch):
     temp_file.close()  # 파일 경로만 사용
     monkeypatch.setattr("os.remove", lambda path: None)
 
-    response = client.post("/file-requests/approve/1")
+    response = client.post("/admin/file-requests/approve/1")
     assert response.status_code == 200
     data = response.json()
     expected_message = (
@@ -166,7 +165,7 @@ def test_reject_file_request(monkeypatch):
 
     monkeypatch.setattr("app.api.routes.admin.get_connection", fake_get_connection)
 
-    response = client.post("/file-requests/reject/1")
+    response = client.post("/admin/file-requests/reject/1")
     assert response.status_code == 200
     data = response.json()
     expected_message = (
