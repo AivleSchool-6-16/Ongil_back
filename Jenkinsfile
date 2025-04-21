@@ -49,6 +49,22 @@ pipeline {
             }
         }
     }
+    stage('Deploy to EC2') {
+        steps {
+            sshagent(['ec2-ssh-key-id']) {
+            sh """
+                ssh -o StrictHostKeyChecking=no ec2-user@13.209.75.223'
+                cd ~/Ongil_back
+                git pull origin main
+                docker build -t ongil-backend:latest .
+                docker stop ongil-back || true
+                docker rm ongil-back || true
+                docker run -d --name ongil-back -p 8000:8000 --env-file .env --restart on-failure ongil-backend:latest
+                '
+            """
+            }
+        }
+        }
     post {
         success {
             echo '빌드 및 테스트가 성공적으로 완료되었습니다.'
