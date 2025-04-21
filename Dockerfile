@@ -4,8 +4,8 @@ FROM python:3.11-slim
 # ── 2) 시스템 의존성 설치 ──
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      build-essential \
-      libmagic1 libmagic-dev \
+    build-essential \
+    libmagic1 libmagic-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ── 3) 작업 디렉터리 설정 ──

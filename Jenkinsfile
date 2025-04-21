@@ -53,7 +53,7 @@ pipeline {
         steps {
             sshagent(['ec2-ssh-key-id']) {
             sh """
-                ssh -o StrictHostKeyChecking=no ec2-user@13.209.75.223'
+                ssh -o StrictHostKeyChecking=no ubuntu@13.209.75.223'
                 cd ~/Ongil_back
                 git pull origin main
                 docker build -t ongil-backend:latest .
