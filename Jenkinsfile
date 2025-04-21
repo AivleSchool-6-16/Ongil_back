@@ -22,12 +22,15 @@ pipeline {
             environment {
                 // 가상환경 경로
                 VIRTUAL_ENV = "${WORKSPACE}/venv"
+                // 프로젝트 루트 (workspace)를 모듈 검색 경로에 추가
+                PYTHONPATH  = "${WORKSPACE}"
                 // SECRET_KEY Credential
                 SECRET_KEY  = credentials('SECRET-KEY')
             }
             steps {
                 sh '''
                     echo "Loaded SECRET_KEY: $SECRET_KEY"
+                    echo "PYTHONPATH=$PYTHONPATH"
 
                     echo "=== 시스템 패키지 설치 ==="
                     apt-get update && apt-get install -y python3-venv python3-pip libmagic1 libmagic-dev
