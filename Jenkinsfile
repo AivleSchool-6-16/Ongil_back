@@ -10,10 +10,10 @@ pipeline {
         DATABASE_URL = "mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
     }
     stages {
-        stage('Prepare Workspace') { 
+        stage('Checkout') {
             steps {
-                // 마운트된 /mnt/ongil-backend 에서 현재 Workspace로 파일 복사(숨김 파일 포함)
-                sh 'cp -r /mnt/ongil-backend/* .'
+                // Git에 연동 
+                checkout scm
             }
         }
         stage('Build') {
