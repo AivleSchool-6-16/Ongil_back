@@ -241,26 +241,41 @@ def signup_error(error_type: str = Query("unknown")):
     """, status_code=400)
 
 
-# 로그인 
 @router.post("/login")
 def login_user(request: LoginRequest):
     user = find_user_by_email(request.email)
     if not user:
         raise HTTPException(status_code=404, detail="존재하지 않는 이메일입니다.")
 
-    if not verify_password(request.password, user["user_ps"]):
-        raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
+    # 관리자 권한 값 조회 (일반 사용자: 1, 개발자: 2 등)
+    admin_value = is_admin(request.email)
 
-    is_admin_user = is_admin(request.email)
-    access_token = create_access_token(data={"sub": request.email, "admin": is_admin_user}, expires_delta=timedelta(hours=12))
-    refresh_token = create_refresh_token(data={"sub": request.email}, expires_delta=timedelta(days=7))
+    # is_admin이 2 (개발자 계정)일 때는 비밀번호 해시 검증 대신 평문 비교를 사용
+    if admin_value == 2:
+        if request.password != user["user_ps"]:
+            raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
+    else:
+        # 일반 사용자: 해시된 비밀번호 검증
+        if not verify_password(request.password, user["user_ps"]):
+            raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
+
+    # 토큰 생성 시, 관리자 여부 값을 payload에 포함
+    access_token = create_access_token(
+        data={"sub": request.email, "admin": admin_value},
+        expires_delta=timedelta(hours=12)
+    )
+    refresh_token = create_refresh_token(
+        data={"sub": request.email},
+        expires_delta=timedelta(days=7)
+    )
 
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-        "is_admin": is_admin_user
+        "is_admin": admin_value
     }
+
 
 # 로그아웃 
 @router.post("/logout")
