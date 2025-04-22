@@ -23,7 +23,7 @@ def load_model(model_path=None, scaler_path=None):
     except FileNotFoundError:
         raise Exception("모델 또는 스케일러 파일을 찾을 수 없습니다.")
 
-# 예측 함수
+# 예측 함수 - 배치 사이즈로 처리해야 진행률을 보낼 수 있음.
 def predict(model, scaler, input_data):
     try:
         # 입력 데이터를 DataFrame으로 변환 (배열 입력 지원)

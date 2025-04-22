@@ -1,7 +1,5 @@
 import random
 import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from email.message import EmailMessage
 import os
 
@@ -42,11 +40,6 @@ def send_email(to_email: str, subject: str, body: str, is_html: bool = False, at
     except Exception as e:
         print(f"❌ Failed to send email: {e}")
     return False
-
-
-def send_file_email(to_email: str, subject: str, body: str, is_html: bool = False, attachment_path: str = None):
-    """파일 첨부 이메일 전송"""
-    return send_email(to_email, subject, body, is_html=is_html, attachment_path=attachment_path)
 
 
 def generate_verification_code():
@@ -117,7 +110,7 @@ def send_signup_email(email: str, token: str):
             <h2>회원가입 이메일 인증</h2>
             <p>안녕하세요, 온길입니다.</p>
             <p>회원가입을 완료하려면 아래 버튼을 클릭하여 이메일 인증을 완료하세요:</p>
-            <a href="http://127.0.0.1:8000/auth/signup/confirm?token={token}" class="button">
+            <a href="http://3.36.187.184:8000/auth/signup/confirm?token={token}" class="button">
                이메일 인증
             </a>
             <p>감사합니다!</p>

@@ -1,8 +1,6 @@
 # 열선 도로 추천 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from datetime import datetime
-from typing import List
 import redis
 import json
 import pandas as pd
@@ -80,7 +78,7 @@ async def road_recommendations(input_data: UserWeight, user: dict = Depends(get_
 
         # 3. 모델 예측을 벡터 연산으로 수행 (predict가 벡터 입력을 지원해야 함)
         feature_array = df[['rd_slope', 'acc_occ', 'acc_sc', 'rd_fr']].values
-        df["예측점수"] = predict(model, scaler, feature_array)  # ✅ 벡터 연산
+        df["예측점수"] = predict(model, scaler, feature_array)  
 
         # 4. 사용자 가중치를 적용하여 pred_idx 계산
         df["pred_idx"] = (
