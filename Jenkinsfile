@@ -2,9 +2,9 @@ pipeline {
   agent any
 
   environment {
-    APP_ENV = 'development'
-    DATABASE_URL = 'mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb'
-    DOCKER_IMAGE = 'ejji/ongil-backend:latest'
+    APP_ENV       = 'development'
+    DATABASE_URL  = 'mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb'
+    DOCKER_IMAGE  = 'ejji/ongil-backend:latest'
   }
 
   stages {
@@ -30,13 +30,16 @@ pipeline {
     stage('Deploy to EC2 via SSH') {
       steps {
         sshagent(credentials: ['ec2-ssh-key-id']) {
-            sh '''
-            ssh -o StrictHostKeyChecking=no ubuntu@3.35.24.187 <<EOF
-                cd ~/Ongil_project
-                docker compose pull backend
-                docker compose up -d backend
+          sh '''
+            echo "🚀 EC2에 SSH로 접속 후 배포 시작"
+            ssh -o StrictHostKeyChecking=no ubuntu@3.35.24.187 <<'EOF'
+              echo "[INFO] EC2 접속 성공"
+              cd ~/Ongil_project
+              docker compose pull backend
+              docker compose up -d backend
+              echo "[✅] 배포 완료"
             EOF
-            '''
+          '''
         }
       }
     }
