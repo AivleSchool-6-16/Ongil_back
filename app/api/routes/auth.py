@@ -271,6 +271,8 @@ def login_user(request: LoginRequest):
         data={"sub": request.email},
         expires_delta=timedelta(days=7)
     )
+    # ✅ 로그인 성공 시 online_users Set에 등록
+    redis_client.sadd("online_users", request.email)
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -289,6 +291,10 @@ def logout(request: LogoutRequest):
     current_time = datetime.now(timezone.utc).timestamp()
     remaining_time = max(int(expiration_time - current_time), 0)
     add_token_to_blacklist(request.token, remaining_time)
+
+    # ✅ 접속자 목록에서 제거
+    email = payload.get("sub")
+    redis_client.srem("online_users", email)
 
     return {"message": "로그아웃 되었습니다."}
 
