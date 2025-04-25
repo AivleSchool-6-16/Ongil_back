@@ -9,7 +9,7 @@ pipeline {
 
     stage('Build & Push Docker Image') {
       steps {
-        withCredentials(bindings: [usernamePassword(credentialsId: 'dockerhub-id', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+        withCredentials(bindings: [usernamePassword(credentialsId:'dockerhub-id', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
           sh '''
                         echo "✅ Docker 이미지 빌드 및 푸시"
                         docker build -t $DOCKER_IMAGE .
