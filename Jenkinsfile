@@ -32,7 +32,7 @@ pipeline {
         sshagent(credentials: ['ec2-ssh-key-id']) {
             sh '''
             ssh -o StrictHostKeyChecking=no ubuntu@3.35.24.187 <<EOF
-                cd ~/ongil-deploy
+                cd ~/Ongil_project
                 docker compose pull backend
                 docker compose up -d backend
             EOF
