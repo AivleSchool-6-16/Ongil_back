@@ -31,10 +31,11 @@ Base = declarative_base()
 
 # ✅ Redis 연결
 try:
-    redis_client = redis.StrictRedis(host="localhost", port=6379, db=0)
+    redis_client = redis.StrictRedis(host="ongil_redis", port=6379, db=0)
 except Exception as e:
     print(f"Redis connection failed: {e}")
     redis_client = None
+
 
 # ✅ DB 종속성
 def get_db():
@@ -43,6 +44,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 # ✅ 백그라운드 스케줄러
 @asynccontextmanager
@@ -56,19 +58,24 @@ async def lifespan(app: FastAPI):
     print("🛑 Shutting down scheduler...")
     scheduler.shutdown()
 
+
 # ✅ FastAPI 앱 설정
 app = FastAPI(root_path="/api", lifespan=lifespan)
 app.mount("/socket.io", socket_app)
+
 
 # ✅ 입력형식 오류 처리
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     errors = exc.errors()
-    error_messages = [{"field": error["loc"], "message": error["msg"]} for error in errors]
+    error_messages = [
+        {"field": error["loc"], "message": error["msg"]} for error in errors
+    ]
     return JSONResponse(
         status_code=400,
         content={"detail": "입력 형식이 올바르지 않습니다.", "errors": error_messages},
     )
+
 
 # ✅ 제외 경로 설정
 EXCLUDED_PATHS = [
@@ -83,6 +90,7 @@ EXCLUDED_PATHS = [
     "/socket.io",
 ]
 
+
 # ✅ 통합 미들웨어 (토큰 확인, Redis 접속자 등록, 방문 로그, 에러 로그 기록)
 @app.middleware("http")
 async def unified_tracking_middleware(request: Request, call_next):
@@ -96,7 +104,9 @@ async def unified_tracking_middleware(request: Request, call_next):
     if not is_excluded and token:
         try:
             if is_token_blacklisted(token):
-                raise HTTPException(status_code=401, detail="토큰이 블랙리스트에 등록되었습니다.")
+                raise HTTPException(
+                    status_code=401, detail="토큰이 블랙리스트에 등록되었습니다."
+                )
             payload = verify_token(token)
             email = payload.get("sub")
             if email and redis_client:
@@ -120,9 +130,9 @@ async def unified_tracking_middleware(request: Request, call_next):
     except Exception as e:
         print(f"[방문 로그 기록 실패] {e}")
     finally:
-        if 'cursor' in locals() and cursor:
+        if "cursor" in locals() and cursor:
             cursor.close()
-        if 'connection' in locals() and connection.is_connected():
+        if "connection" in locals() and connection.is_connected():
             connection.close()
 
     # 에러 로그 저장
@@ -136,12 +146,13 @@ async def unified_tracking_middleware(request: Request, call_next):
         except Exception as e:
             print(f"[에러 로그 기록 실패] {e}")
         finally:
-            if 'cursor' in locals() and cursor:
+            if "cursor" in locals() and cursor:
                 cursor.close()
-            if 'connection' in locals() and connection.is_connected():
+            if "connection" in locals() and connection.is_connected():
                 connection.close()
 
     return response
+
 
 # ✅ CORS 설정
 app.add_middleware(
@@ -159,6 +170,7 @@ app.include_router(mypage.router, prefix="/mypage", tags=["MyPage"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 app.include_router(roads.router, prefix="/roads", tags=["Roads"])
 app.include_router(dev.router, prefix="/dev", tags=["Dev"])
+
 
 @app.get("/")
 def root():

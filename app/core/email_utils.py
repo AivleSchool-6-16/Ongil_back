@@ -11,7 +11,13 @@ SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 SENDER_NAME = "온길 - Ongil"  # 보내는 사람 이름
 
 
-def send_email(to_email: str, subject: str, body: str, is_html: bool = False, attachment_path: str = None):
+def send_email(
+    to_email: str,
+    subject: str,
+    body: str,
+    is_html: bool = False,
+    attachment_path: str = None,
+):
     """이메일 전송 함수 (텍스트/HTML/파일 첨부 가능)"""
     msg = EmailMessage()
     msg["From"] = f"{SENDER_NAME} <{SENDER_EMAIL}>"  # 보낸 사람 이메일 포함
@@ -23,7 +29,12 @@ def send_email(to_email: str, subject: str, body: str, is_html: bool = False, at
     if attachment_path:
         try:
             with open(attachment_path, "rb") as file:
-                msg.add_attachment(file.read(), maintype="application", subtype="octet-stream", filename=os.path.basename(attachment_path))
+                msg.add_attachment(
+                    file.read(),
+                    maintype="application",
+                    subtype="octet-stream",
+                    filename=os.path.basename(attachment_path),
+                )
         except FileNotFoundError:
             raise ValueError(f"❌ File not found: {attachment_path}")
 
@@ -50,7 +61,7 @@ def generate_verification_code():
 def send_verification_email(email: str, code: str):
     """비밀번호 복구 인증번호 이메일 전송"""
     subject = "비밀번호 복구 인증번호"
-    
+
     html_content = f"""
     <html>
         <body style="text-align: center; font-family: Arial, sans-serif; background-color: #f8f9fa; padding: 20px;">

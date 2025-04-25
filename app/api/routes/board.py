@@ -23,7 +23,7 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 try:
     redis_client = redis.StrictRedis(
-        host="localhost", port=6379, db=0, decode_responses=True
+        host="ongil_redis", port=6379, db=0, decode_responses=True
     )
 except Exception as e:
     print(f"Redis connection failed: {e}")
