@@ -30,14 +30,13 @@ pipeline {
     stage('Deploy to EC2 via SSH') {
       steps {
         sshagent(credentials: ['ec2-ssh-key-id']) {
-          sh '''
-            echo "🚀 EC2에 SSH로 접속 후 배포 시작"
+            sh '''
             ssh -o StrictHostKeyChecking=no ubuntu@3.35.24.187 <<EOF
-              cd ~/Ongil_project
-              docker-compose pull backend
-              docker-compose up -d backend
+                cd ~/ongil-deploy
+                docker compose pull backend
+                docker compose up -d backend
             EOF
-          '''
+            '''
         }
       }
     }
