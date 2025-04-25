@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
 
 
 # ✅ 웹 선언
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(root_path="/api", lifespan=lifespan)
 app.mount("/socket.io", socket_app)
 
 
