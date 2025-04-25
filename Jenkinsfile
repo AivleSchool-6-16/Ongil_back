@@ -33,7 +33,7 @@ pipeline {
           sh '''
             echo "🚀 EC2에 SSH로 접속 후 배포 시작"
             ssh -o StrictHostKeyChecking=no ubuntu@3.35.24.187 <<EOF
-              cd ~/ongil-deploy
+              cd ~/Ongil_project
               docker-compose pull backend
               docker-compose up -d backend
             EOF
