@@ -38,7 +38,7 @@ pipeline {
         sshagent(credentials: ['ec2-ssh-key-id']) {
           sh '''
             echo "🚀 EC2에 SSH로 접속 후 배포 시작"
-            ssh -o StrictHostKeyChecking=no ubuntu@3.35.24.187 '
+            ssh -o StrictHostKeyChecking=no ubuntu@3.39.173.81'
               echo "[INFO] EC2 접속 성공" &&
               cd ~/Ongil_project &&
               docker compose pull backend &&

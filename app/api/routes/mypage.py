@@ -10,6 +10,21 @@ from app.core.token_blacklist import is_token_blacklisted, add_token_to_blacklis
 from app.database.mysql_connect import get_connection
 
 
+# 관리자 확인
+def is_admin(email: str):
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        query = "SELECT is_admin FROM permissions WHERE user_email = %s"
+        cursor.execute(query, (email,))
+        result = cursor.fetchone()
+        return result and result["is_admin"]
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
 def execute_query(query: str, params: tuple = ()):
     conn = None
     cursor = None
@@ -82,9 +97,16 @@ def check_password(password: str, token: str = Header(...)):
 
         db_hashed_ps = user_record[0]["user_ps"]
 
-        # Verify password using bcrypt
-        if not verify_password(password, db_hashed_ps):
-            raise HTTPException(status_code=400, detail="비밀번호가 다릅니다.")
+        admin_value = is_admin(user_email)
+
+        if admin_value == 2:
+            # 개발자 계정은 평문 비교
+            if password != db_hashed_ps:
+                raise HTTPException(status_code=400, detail="비밀번호가 다릅니다.")
+        else:
+            # 일반 계정은 해시 비교
+            if not verify_password(password, db_hashed_ps):
+                raise HTTPException(status_code=400, detail="비밀번호가 다릅니다.")
 
         return {"message": "비밀번호가 확인되었습니다."}
     except Exception:
