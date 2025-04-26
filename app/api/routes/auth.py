@@ -212,7 +212,7 @@ def confirm_email(token: str = Query(...)):
 
         # 이미 이메일이 있다면
         if find_user_by_email(email):
-            return RedirectResponse(url="https://ongil.vercel.app")
+            return RedirectResponse(url="http://3.39.173.81/")
 
         # 레디스에서 확인
         user_data_json = redis_client.get(f"signup_data:{email}")
@@ -247,7 +247,7 @@ def confirm_email(token: str = Query(...)):
         redis_client.delete(f"signup_data:{email}")
 
         # 인증 완료 후 로그인 리디렉션
-        return RedirectResponse(url="https://ongil.vercel.app")
+        return RedirectResponse(url="http://3.39.173.81/")
 
     except Exception:
         return RedirectResponse(url="/signup/error?error_type=unknown")
