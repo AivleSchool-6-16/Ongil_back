@@ -14,15 +14,20 @@ pipeline {
       }
     }
 
+    stage('Copy .env') {
+      steps {
+        echo "📦 .env 복사 (서버 내 저장된 경로에서)"
+        sh 'cp /home/ubuntu/ongil-envs/.env.backend .env'
+      }
+    }
+
     stage('Build & Push Docker Image') {
       steps {
-        withCredentials([
-          usernamePassword(
-            credentialsId: 'dockerhub-id',
-            usernameVariable: 'DOCKER_USER',
-            passwordVariable: 'DOCKER_PASS'
-          )
-        ]) {
+        withCredentials([usernamePassword(
+          credentialsId: 'dockerhub-id',
+          usernameVariable: 'DOCKER_USER',
+          passwordVariable: 'DOCKER_PASS'
+        )]) {
           sh '''
             echo "✅ Docker 이미지 빌드 및 푸시"
             docker build -t $DOCKER_IMAGE .
@@ -39,7 +44,6 @@ pipeline {
           sh '''
             echo "🚀 EC2에 SSH로 접속 후 배포 시작"
             ssh -o StrictHostKeyChecking=no ubuntu@3.39.173.81 '
-              echo "[INFO] EC2 접속 성공" &&
               cd ~/Ongil_project &&
               docker compose pull backend &&
               docker compose up -d backend &&
@@ -56,7 +60,7 @@ pipeline {
       echo '✅ 백엔드 파이프라인 완료!'
     }
     failure {
-      echo '❌ 파이프라인 실패. 로그 확인 요망.'
+      echo '❌ 백엔드 파이프라인 실패. 로그 확인 요망.'
     }
   }
 }
