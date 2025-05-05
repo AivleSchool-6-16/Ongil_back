@@ -68,7 +68,7 @@ python-magic==0.4.24
 python-multipart==0.0.20
 python-socketio==5.12.1
 pytz==2024.2
-pywin32==310
+#pywin32==310
 PyYAML==6.0.2
 pyzmq==25.1.1
 redis==4.3.4
