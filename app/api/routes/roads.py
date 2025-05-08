@@ -27,10 +27,11 @@ model, scaler = load_model()
 
 class UserWeight(BaseModel):
     region: str
-    rd_slope_weight: float = 3.0
+    rd_slope_weight: float = 2.5
     acc_occ_weight: float = 3.0
-    acc_sc_weight: float = 2.0
-    rd_fr_weight: float = 2.0
+    acc_sc_weight: float = 1.5
+    rd_fr_weight: float = 1.5
+    traff_weight: float = 1.5
 
     class Config:
         extra = Extra.ignore 
@@ -61,7 +62,7 @@ def get_district(
         connection.close()
 
 
-# ✅ 열선 도로 추천 (sigungu 제거)
+# ✅ 열선 도로 추천 (sigungu 제거, traff 추가)
 @router.post("/recommend")
 async def road_recommendations(
     input_data: UserWeight, user: dict = Depends(get_authenticated_user)
@@ -72,9 +73,9 @@ async def road_recommendations(
 
         asyncio.create_task(run_model_with_progress(user["sub"]))
 
-        # ✅ 1. 쿼리 수정 (sig_cd 제거)
+        # ✅ 1. 쿼리 수정 (sig_cd 제거, traff 추가가)
         query = """
-        SELECT rds_id, road_name, rbp, rep, rd_slope, acc_occ, acc_sc, rd_fr 
+        SELECT rds_id, road_name, rbp, rep, rd_slope, acc_occ, acc_sc, rd_fr, traff 
         FROM seoul_info 
         WHERE rds_rg = %s
         """
@@ -89,14 +90,32 @@ async def road_recommendations(
 
         # ✅ 2~8. 이하 동일
         df = pd.DataFrame(roads)
-        feature_array = df[["rd_slope", "acc_occ", "acc_sc", "rd_fr"]].values
+        feature_array = df[["rd_slope", "acc_occ", "acc_sc", "rd_fr", "traff"]].values
         df["예측점수"] = predict(model, scaler, feature_array)
+        
+        # 가중치 정규화 (추가)
+        w = {
+            "rd_slope": input_data.rd_slope_weight,
+            "acc_occ" : input_data.acc_occ_weight,
+            "acc_sc"  : input_data.acc_sc_weight,
+            "rd_fr"   : input_data.rd_fr_weight,
+            "traff"   : input_data.traff_weight,
+        }
+        total = sum(w.values())
+        if total > 0:
+            w = {k: v/total for k, v in w.items()}
+        else:
+            w = {k: 1/len(w) for k in w}
+
+
+        #pred_idx 계산 (수정)
         df["pred_idx"] = (
             df["예측점수"] * 0.3
-            + df["rd_slope"] * input_data.rd_slope_weight
-            + df["acc_occ"] * input_data.acc_occ_weight
-            + df["acc_sc"] * input_data.acc_sc_weight
-            + df["rd_fr"] * input_data.rd_fr_weight
+            + df["rd_slope"] * w["rd_slope"]
+            + df["acc_occ"]  * w["acc_occ"]
+            + df["acc_sc"]   * w["acc_sc"]
+            + df["rd_fr"]    * w["rd_fr"]
+            + df["traff"]    * w["traff"]
         )
 
         min_score, max_score = df["pred_idx"].min(), df["pred_idx"].max()
@@ -133,6 +152,7 @@ async def road_recommendations(
                 "acc_occ_weight": input_data.acc_occ_weight,
                 "acc_sc_weight": input_data.acc_sc_weight,
                 "rd_fr_weight": input_data.rd_fr_weight,
+                "traff_weight": input_data.traff_weight,
             },
             "recommended_roads": recommended_roads,
         }
