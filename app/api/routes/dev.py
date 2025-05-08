@@ -68,6 +68,36 @@ def get_online_users():
   return {"count": count}
 
 
+@router.get("/status/real-time/users")
+def get_online_user_list():
+  if redis_client is None:
+    raise HTTPException(status_code=500, detail="Redis 연결 오류")
+
+  emails = [e.decode() for e in redis_client.smembers("online_users")]
+  if not emails:  # 접속 중인 유저가 없으면 빈 리스트
+    return []
+
+  try:
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    placeholders = ",".join(["%s"] * len(emails))
+    query = (
+      f"SELECT user_email AS email, user_name AS name, user_dept AS department "
+      f"FROM user_data WHERE user_email IN ({placeholders})"
+    )
+    cursor.execute(query, tuple(emails))
+    return cursor.fetchall()
+
+  except Exception as e:
+    print("online users API error:", e)
+    raise HTTPException(status_code=500, detail="실시간 유저 조회 실패")
+
+  finally:
+    if 'cursor' in locals(): cursor.close()
+    if 'connection' in locals() and connection.is_connected(): connection.close()
+
+
 @router.get("/status/today-visitors")
 def get_today_visitors():
   try:
@@ -275,3 +305,95 @@ def error_types():
   finally:
     cursor.close()
     connection.close()
+
+
+# dev.py
+@router.get("/ai/logs")
+def get_ai_logs(limit: int = 10):
+  """최근 AI 예측 로그 n건"""
+  try:
+    conn = get_connection();
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+                SELECT id,
+                       user_email,
+                       region,
+                       latency,
+                       icing_weight,
+                       slope_weight,
+                       accident_severity_weight,
+                       traffic_weight, timestamp
+                FROM ai_log
+                ORDER BY id DESC
+                    LIMIT %s
+                """, (limit,))
+    return cur.fetchall()
+  finally:
+    cur.close();
+    conn.close()
+
+
+# dev.py  ── AI 사용량 카운트용
+@router.get("/status/recent-recommend")
+def recent_recommend_count(hours: int = 24):
+  try:
+    conn = get_connection();
+    cur = conn.cursor()
+    cur.execute(f"""
+            SELECT COUNT(*) 
+              FROM rec_road_log
+             WHERE timestamp >= NOW() - INTERVAL %s HOUR
+        """, (hours,))
+    return {"count": cur.fetchone()[0]}
+  finally:
+    cur.close();
+    conn.close()
+
+
+# === NEW: 권한 enum 변환 도우미 ---------------------------------
+PERM2INT = {"자치동": 0, "자치구": 1, "개발자": 2}
+
+
+# === NEW: 권한 수정 --------------------------------------------
+class PermPatch(BaseModel):
+  new_permission: str  # '자치구' | '개발자' | '자치동'
+
+
+@router.patch("/users/{email}")
+def change_user_permission(email: EmailStr, body: PermPatch):
+  perm_int = PERM2INT.get(body.new_permission)
+  if perm_int is None:
+    raise HTTPException(400, "잘못된 권한 값")
+
+  try:
+    conn = get_connection();
+    cur = conn.cursor()
+    # permissions 테이블 없으면 user_data에 is_admin 직접 저장하셔도 됩니다
+    cur.execute("REPLACE INTO permissions (user_email,is_admin) VALUES (%s,%s)",
+                (email, perm_int))
+    conn.commit()
+    return {"ok": True}
+
+  except Exception as e:
+    raise HTTPException(500, "권한 변경 실패")
+
+  finally:
+    cur.close();
+    conn.close()
+
+
+# === NEW: 회원 추방(하드 delete 예시) ----------------------------
+@router.delete("/users/{email}")
+def delete_user(email: EmailStr):
+  try:
+    conn = get_connection();
+    cur = conn.cursor()
+    cur.execute("DELETE FROM permissions WHERE user_email=%s", (email,))
+    cur.execute("DELETE FROM user_data WHERE user_email=%s", (email,))
+    conn.commit()
+    return {"ok": True}
+  except:
+    raise HTTPException(500, "회원 삭제 실패")
+  finally:
+    cur.close();
+    conn.close()
