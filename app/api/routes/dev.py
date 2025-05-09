@@ -394,16 +394,20 @@ def ai_today_stats():
     connection.close()
 
 
+# ── dev.py 중 일부 ──────────────────────────────────────────
 @router.get("/ai/predicts/recent")
 def recent_predict_logs(limit: int = 30):
-  """최근 AI 예측 로그 (EMAIL / Nickname / Region / Latency / Weights / Time)"""
+  """
+  EMAIL / user_name → nickname 별칭 / Region / Latency / Weights / Time
+  """
   try:
     connection = get_connection()
     cursor = connection.cursor(dictionary=True)
+
     cursor.execute(
         """
         SELECT p.user_email AS email,
-               u.nickname,
+               u.user_name  AS nickname, -- ★ user_name → nickname
                p.region,
                p.latency_ms AS latency,
                CONCAT_WS('/', p.rd_slope_weight, p.acc_occ_weight,
@@ -411,14 +415,15 @@ def recent_predict_logs(limit: int = 30):
                             AS weights,
                p.predict_date AS time
         FROM predicts_log p
-            LEFT JOIN users u
-        ON u.email = p.user_email
+            LEFT JOIN user_data u
+        ON u.user_email = p.user_email -- ★ user_data 테이블
         ORDER BY p.id DESC
             LIMIT %s
         """,
         (limit,),
     )
     return {"logs": cursor.fetchall()}
+
   finally:
     cursor.close()
     connection.close()
