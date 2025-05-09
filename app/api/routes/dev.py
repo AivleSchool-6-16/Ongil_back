@@ -307,32 +307,6 @@ def error_types():
     connection.close()
 
 
-# dev.py
-@router.get("/ai/logs")
-def get_ai_logs(limit: int = 10):
-  """최근 AI 예측 로그 n건"""
-  try:
-    conn = get_connection();
-    cur = conn.cursor(dictionary=True)
-    cur.execute("""
-                SELECT id,
-                       user_email,
-                       region,
-                       latency,
-                       icing_weight,
-                       slope_weight,
-                       accident_severity_weight,
-                       traffic_weight, timestamp
-                FROM ai_log
-                ORDER BY id DESC
-                    LIMIT %s
-                """, (limit,))
-    return cur.fetchall()
-  finally:
-    cur.close();
-    conn.close()
-
-
 # dev.py  ── AI 사용량 카운트용
 @router.get("/status/recent-recommend")
 def recent_recommend_count(hours: int = 24):
@@ -397,3 +371,75 @@ def delete_user(email: EmailStr):
   finally:
     cur.close();
     conn.close()
+
+
+# ─────────────────────────────────────────────────────────────
+@router.get("/ai/today-stats")
+def ai_today_stats():
+  """Today_Predict & Predict_AVG (ms)"""
+  try:
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT COUNT(*)                  AS today_predict,
+               ROUND(AVG(latency_ms), 2) AS predict_avg_ms
+        FROM predicts_log
+        WHERE DATE (predict_date) = CURDATE()
+        """
+    )
+    return cursor.fetchone()
+  finally:
+    cursor.close()
+    connection.close()
+
+
+@router.get("/ai/predicts/recent")
+def recent_predict_logs(limit: int = 30):
+  """최근 AI 예측 로그 (EMAIL / Nickname / Region / Latency / Weights / Time)"""
+  try:
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT p.user_email AS email,
+               u.nickname,
+               p.region,
+               p.latency_ms AS latency,
+               CONCAT_WS('/', p.rd_slope_weight, p.acc_occ_weight,
+                         p.acc_sc_weight, p.rd_fr_weight, p.traff_weight)
+                            AS weights,
+               p.predict_date AS time
+        FROM predicts_log p
+            LEFT JOIN users u
+        ON u.email = p.user_email
+        ORDER BY p.id DESC
+            LIMIT %s
+        """,
+        (limit,),
+    )
+    return {"logs": cursor.fetchall()}
+  finally:
+    cursor.close()
+    connection.close()
+
+
+@router.get("/ai/latency/region-avg")
+def region_avg_latency():
+  """읍·면·동별 평균 지연(ms) -> 막대그래프용"""
+  try:
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT region,
+               ROUND(AVG(latency_ms), 2) AS avg_latency_ms
+        FROM predicts_log
+        GROUP BY region
+        ORDER BY avg_latency_ms DESC
+        """
+    )
+    return {"region_latency": cursor.fetchall()}
+  finally:
+    cursor.close()
+    connection.close()
