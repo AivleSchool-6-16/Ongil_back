@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy import create_engine
@@ -7,8 +7,6 @@ from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 from starlette.responses import JSONResponse
-from fastapi.routing import APIRoute
-from datetime import datetime
 from app.database.mysql_connect import get_connection
 from app.api.routes import admin, auth, board, mypage, roads, dev
 from app.core.token_blacklist import is_token_blacklisted
@@ -19,17 +17,17 @@ from dotenv import load_dotenv
 import os
 import redis
 
-# ✅ 환경변수 로드
+# 환경변수 로드
 env_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(dotenv_path=env_path)
 
-# ✅ DB 연결
-DATABASE_URL = "mysql+pymysql://admin:aivle202406@ongil-1.criqwcemqnaf.ap-northeast-2.rds.amazonaws.com:3306/ongildb"
+# DB 연결
+DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# ✅ Redis 연결
+# Redis 연결
 try:
     redis_client = redis.StrictRedis(host="ongil_redis", port=6379, db=0)
 except Exception as e:
@@ -37,7 +35,7 @@ except Exception as e:
     redis_client = None
 
 
-# ✅ DB 종속성
+# DB 종속성
 def get_db():
     db = SessionLocal()
     try:
@@ -46,7 +44,7 @@ def get_db():
         db.close()
 
 
-# ✅ 백그라운드 스케줄러
+# 백그라운드 스케줄러
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 App is starting... Initializing scheduler")
@@ -59,12 +57,12 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 
-# ✅ FastAPI 앱 설정
+# FastAPI 앱 설정
 app = FastAPI(root_path="/api", lifespan=lifespan)
 app.mount("/socket.io", socket_app)
 
 
-# ✅ 입력형식 오류 처리
+# 입력형식 오류 처리
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     errors = exc.errors()
@@ -77,7 +75,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-# ✅ 제외 경로 설정
+# 제외 경로 설정
 EXCLUDED_PATHS = [
     "/auth/login",
     "/auth/signup",
@@ -91,7 +89,7 @@ EXCLUDED_PATHS = [
 ]
 
 
-# ✅ 통합 미들웨어 (토큰 확인, Redis 접속자 등록, 방문 로그, 에러 로그 기록)
+# 통합 미들웨어 (토큰 확인, Redis 접속자 등록, 방문 로그, 에러 로그 기록)
 @app.middleware("http")
 async def unified_tracking_middleware(request: Request, call_next):
     path = request.url.path
@@ -154,7 +152,7 @@ async def unified_tracking_middleware(request: Request, call_next):
     return response
 
 
-# ✅ CORS 설정
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -163,7 +161,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ 라우터 등록
+# 라우터 등록
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(board.router, prefix="/board", tags=["Board"])
 app.include_router(mypage.router, prefix="/mypage", tags=["MyPage"])
