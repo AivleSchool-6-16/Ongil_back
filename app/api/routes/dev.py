@@ -68,6 +68,36 @@ def get_online_users():
   return {"count": count}
 
 
+@router.get("/status/real-time/users")
+def get_online_user_list():
+  if redis_client is None:
+    raise HTTPException(status_code=500, detail="Redis 연결 오류")
+
+  emails = [e.decode() for e in redis_client.smembers("online_users")]
+  if not emails:  # 접속 중인 유저가 없으면 빈 리스트
+    return []
+
+  try:
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    placeholders = ",".join(["%s"] * len(emails))
+    query = (
+      f"SELECT user_email AS email, user_name AS name, user_dept AS department "
+      f"FROM user_data WHERE user_email IN ({placeholders})"
+    )
+    cursor.execute(query, tuple(emails))
+    return cursor.fetchall()
+
+  except Exception as e:
+    print("online users API error:", e)
+    raise HTTPException(status_code=500, detail="실시간 유저 조회 실패")
+
+  finally:
+    if 'cursor' in locals(): cursor.close()
+    if 'connection' in locals() and connection.is_connected(): connection.close()
+
+
 @router.get("/status/today-visitors")
 def get_today_visitors():
   try:
@@ -272,6 +302,149 @@ def error_types():
     return cursor.fetchall()
   except:
     raise HTTPException(status_code=500, detail="에러 타입 데이터 조회 실패")
+  finally:
+    cursor.close()
+    connection.close()
+
+
+# dev.py  ── AI 사용량 카운트용
+@router.get("/status/recent-recommend")
+def recent_recommend_count(hours: int = 24):
+  try:
+    conn = get_connection();
+    cur = conn.cursor()
+    cur.execute(f"""
+            SELECT COUNT(*) 
+              FROM rec_road_log
+             WHERE timestamp >= NOW() - INTERVAL %s HOUR
+        """, (hours,))
+    return {"count": cur.fetchone()[0]}
+  finally:
+    cur.close();
+    conn.close()
+
+
+# === NEW: 권한 enum 변환 도우미 ---------------------------------
+PERM2INT = {"자치동": 0, "자치구": 1, "개발자": 2}
+
+
+# === NEW: 권한 수정 --------------------------------------------
+class PermPatch(BaseModel):
+  new_permission: str  # '자치구' | '개발자' | '자치동'
+
+
+@router.patch("/users/{email}")
+def change_user_permission(email: EmailStr, body: PermPatch):
+  perm_int = PERM2INT.get(body.new_permission)
+  if perm_int is None:
+    raise HTTPException(400, "잘못된 권한 값")
+
+  try:
+    conn = get_connection();
+    cur = conn.cursor()
+    # permissions 테이블 없으면 user_data에 is_admin 직접 저장하셔도 됩니다
+    cur.execute("REPLACE INTO permissions (user_email,is_admin) VALUES (%s,%s)",
+                (email, perm_int))
+    conn.commit()
+    return {"ok": True}
+
+  except Exception as e:
+    raise HTTPException(500, "권한 변경 실패")
+
+  finally:
+    cur.close();
+    conn.close()
+
+
+# === NEW: 회원 추방(하드 delete 예시) ----------------------------
+@router.delete("/users/{email}")
+def delete_user(email: EmailStr):
+  try:
+    conn = get_connection();
+    cur = conn.cursor()
+    cur.execute("DELETE FROM permissions WHERE user_email=%s", (email,))
+    cur.execute("DELETE FROM user_data WHERE user_email=%s", (email,))
+    conn.commit()
+    return {"ok": True}
+  except:
+    raise HTTPException(500, "회원 삭제 실패")
+  finally:
+    cur.close();
+    conn.close()
+
+
+# ─────────────────────────────────────────────────────────────
+@router.get("/ai/today-stats")
+def ai_today_stats():
+  """Today_Predict & Predict_AVG (ms)"""
+  try:
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT COUNT(*)                  AS today_predict,
+               ROUND(AVG(latency_ms), 2) AS predict_avg_ms
+        FROM predicts_log
+        WHERE DATE (predict_date) = CURDATE()
+        """
+    )
+    return cursor.fetchone()
+  finally:
+    cursor.close()
+    connection.close()
+
+
+# ── dev.py 중 일부 ──────────────────────────────────────────
+@router.get("/ai/predicts/recent")
+def recent_predict_logs(limit: int = 30):
+  """
+  EMAIL / user_name → nickname 별칭 / Region / Latency / Weights / Time
+  """
+  try:
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    cursor.execute(
+        """
+        SELECT p.user_email AS email,
+               u.user_name  AS nickname, -- ★ user_name → nickname
+               p.region,
+               p.latency_ms AS latency,
+               CONCAT_WS('/', p.rd_slope_weight, p.acc_occ_weight,
+                         p.acc_sc_weight, p.rd_fr_weight, p.traff_weight)
+                            AS weights,
+               p.predict_date AS time
+        FROM predicts_log p
+            LEFT JOIN user_data u
+        ON u.user_email = p.user_email -- ★ user_data 테이블
+        ORDER BY p.id DESC
+            LIMIT %s
+        """,
+        (limit,),
+    )
+    return {"logs": cursor.fetchall()}
+
+  finally:
+    cursor.close()
+    connection.close()
+
+
+@router.get("/ai/latency/region-avg")
+def region_avg_latency():
+  """읍·면·동별 평균 지연(ms) -> 막대그래프용"""
+  try:
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT region,
+               ROUND(AVG(latency_ms), 2) AS avg_latency_ms
+        FROM predicts_log
+        GROUP BY region
+        ORDER BY avg_latency_ms DESC
+        """
+    )
+    return {"region_latency": cursor.fetchall()}
   finally:
     cursor.close()
     connection.close()
